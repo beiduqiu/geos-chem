@@ -85,6 +85,9 @@ MODULE FullChem_Mod
   REAL(fP), ALLOCATABLE  :: C_balanced(:,:)
   REAL(fP), ALLOCATABLE  :: RCONST_balanced(:,:)
   INTEGER,  ALLOCATABLE  :: ICNTRL_balanced(:,:)
+  INTEGER,  ALLOCATABLE  :: RANDOM_CHUNK(:)
+  REAL(fp), ALLOCATABLE  :: REAL_RANDOM_CHUNK(:)
+  INTEGER,  ALLOCATABLE  :: RECV_LEN(:)
   REAL(fP), ALLOCATABLE  :: RCNTRL_balanced(:,:)
   INTEGER,  ALLOCATABLE  :: ISTATUS_balanced(:,:)
   REAL(fP), ALLOCATABLE  :: RSTATE_balanced(:,:)
@@ -185,7 +188,7 @@ CONTAINS
     INTEGER                :: NA,         F,         SpcID,    KppID
     INTEGER                :: P,          MONTH,     YEAR,     Day
     INTEGER                :: IERR,       S,         Thread
-    INTEGER                :: errorCount
+    INTEGER                :: errorCount, SEND_CUR, RECV_CUR
     REAL(fp)               :: SO4_FRAC,   T,         TIN
     REAL(fp)               :: TOUT,       SR,        LWC
 
@@ -1105,18 +1108,64 @@ CONTAINS
     else
         prev_PET = this_PET - 1
     endif
-    ! How many cells are to be processed?
+   call random_seed()
+   call RANDOM_NUMBER(REAL_RANDOM_CHUNK)
+   RANDOM_CHUNK(1) = 0
+   RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local
+   ! Break points
+   do i=0,Input_Opt%numCPUs-2
+      REAL_RANDOM_CHUNK(i+1) = REAL_RANDOM_CHUNK(i+1) * (NCELL_local-2) +1
+      RANDOM_CHUNK(i+2) = int(REAL_RANDOM_CHUNK(i+1))
+      print *, 'RANDOM_CHUNK ID: ', i, 'VALUE: ', RANDOM_CHUNK(i+1)
+   end do
+
+
+   ! Boundary conditions for start and end of segments
+
+   ! Sort the break points
+   call bubble_sort(RANDOM_CHUNK)
+   do i=0,Input_Opt%numCPUs
+      print *, 'Ordered RANDOM_CHUNK ID: ', i, 'VALUE: ', RANDOM_CHUNK(i+1)
+   end do
+   ! Send segment lengths
+do i=0,Input_Opt%numCPUs-1
+    Call MPI_Isend((RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1)), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+end do
+
+! Recv segment lengths
+do i=0,Input_Opt%numCPUs-1
+    Call MPI_Recv(RECV_LEN(i+1),1,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+end do
+
+
     Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    ! Pass the actual data
-    Call MPI_Isend(C_1D(1,1),NCELL_local*NSPEC,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(C_balanced(1,1),NCELL_balanced*NSPEC,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RCONST_1D(1,1),NCELL_local*NREACT,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RCONST_balanced(1,1),NCELL_balanced*NREACT,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(ICNTRL_1D(1,1),NCELL_local*20,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(ICNTRL_balanced(1,1),NCELL_balanced*20,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RCNTRL_1D(1,1),NCELL_local*20,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RCNTRL_balanced(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   
+do i=0,Input_Opt%numCPUs-1
+   print *,'This PET: ', this_PET, 'Send chunk number : ', RANDOM_CHUNK(i+1)
+   print *,'This PET: ', this_PET, 'Size of c_1D : ', SHAPE(C_1D),'Size of RCONST_1D',SHAPE(RCONST_1D), 'Size of ICNTRL_1D',SHAPE(ICNTRL_1D), 'Size of RCNTRL_1D',SHAPE(RCNTRL_1D)
+    Call MPI_Isend(C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+    Call MPI_Isend(RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+    Call MPI_Isend(ICNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+    Call MPI_Isend(RCNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+end do
+
+! Recv segments
+RECV_CUR = 1
+do i=0,Input_Opt%numCPUs-1
+    Call MPI_Recv(C_balanced(1,RECV_CUR), RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+    Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+    Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+    Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+    RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+end do
+   print *,'This PET: ', this_PET, 'Size of c_balanced : ', SHAPE(C_balanced),'Size of RCONST_balanced',SHAPE(RCONST_balanced), 'Size of ICNTRL_balanced',SHAPE(ICNTRL_balanced), 'Size of RCNTRL_balanced',SHAPE(RCNTRL_balanced)
+
+
+
+
+
+
 #endif
 
     !$OMP PARALLEL DO                                                        &
@@ -2644,6 +2693,23 @@ CONTAINS
     !$OMP END PARALLEL DO
 
   END SUBROUTINE Diag_Metrics
+
+  SUBROUTINE bubble_sort(arr)
+      INTEGER, DIMENSION(:), INTENT(INOUT) :: arr
+      INTEGER :: i, j, n
+      REAL :: temp
+   
+      n = SIZE(arr)
+      DO i = 1, n-1
+         DO j = i+1, n
+            IF (arr(i) > arr(j)) THEN
+               temp = arr(i)
+               arr(i) = arr(j)
+               arr(j) = temp
+            ENDIF
+         ENDDO
+      ENDDO
+   END SUBROUTINE bubble_sort
 !EOC
 !------------------------------------------------------------------------------
 !                  GEOS-Chem Global Chemical Transport Model                  !
@@ -2989,6 +3055,24 @@ CONTAINS
         CALL GC_Error( 'Failed to allocate ISTATUS_balanced', RC, ThisLoc )
         RETURN
     End If
+    Allocate(RANDOM_CHUNK(Input_Opt%numCPUs+1), STAT=RC)
+    Call GC_CheckVar( 'fullchem_mod.F90:RANDOM_CHUNK', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate RANDOM_CHUNK', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(REAL_RANDOM_CHUNK(Input_Opt%numCPUs-1), STAT=RC)
+   Call GC_CheckVar( 'fullchem_mod.F90:REAL_RANDOM_CHUNK', 0, RC )
+   IF ( RC /= GC_SUCCESS ) Then
+         CALL GC_Error( 'Failed to allocate REAL_RANDOM_CHUNK', RC, ThisLoc )
+         RETURN
+   End If
+   Allocate(RECV_LEN(Input_Opt%numCPUs), STAT=RC)
+   Call GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 0, RC )
+   IF ( RC /= GC_SUCCESS ) Then
+         CALL GC_Error( 'Failed to allocate RECV_LEN', RC, ThisLoc )
+         RETURN
+   End If
     Allocate(RSTATE_balanced (20,NCELL_max)    , STAT=RC)
     CALL GC_CheckVar( 'fullchem_mod.F90:RSTATE_balanced', 0, RC )
     IF ( RC /= GC_SUCCESS ) Then
@@ -3148,6 +3232,21 @@ CONTAINS
        CALL GC_CheckVar( 'fullchem_mod.F90:RSTATE_balanced', 2, RC )
        IF ( RC /= GC_SUCCESS ) RETURN
     ENDIF
+    IF(ALLOCATED(RANDOM_CHUNK)) THEN
+       DEALLOCATE(RANDOM_CHUNK, STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:RANDOM_CHUNK', 2, RC )
+       IF ( RC /= GC_SUCCESS ) RETURN
+      ENDIF
+   IF(ALLOCATED(REAL_RANDOM_CHUNK)) THEN
+       DEALLOCATE(REAL_RANDOM_CHUNK, STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:REAL_RANDOM_CHUNK', 2, RC )
+       IF ( RC /= GC_SUCCESS ) RETURN
+      ENDIF
+   IF(ALLOCATED(RECV_LEN)) THEN
+       DEALLOCATE(RECV_LEN, STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 2, RC )
+       IF ( RC /= GC_SUCCESS ) RETURN
+      ENDIF
 
   END SUBROUTINE Cleanup_FullChem
 !EOC
