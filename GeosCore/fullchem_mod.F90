@@ -1111,22 +1111,26 @@ CONTAINS
    call random_seed()
    call RANDOM_NUMBER(REAL_RANDOM_CHUNK)
    RANDOM_CHUNK(1) = 0
-   RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local
+   RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local-1
    ! Break points
    do i=0,Input_Opt%numCPUs-2
       REAL_RANDOM_CHUNK(i+1) = REAL_RANDOM_CHUNK(i+1) * (NCELL_local-2) +1
       RANDOM_CHUNK(i+2) = int(REAL_RANDOM_CHUNK(i+1))
-      print *, 'RANDOM_CHUNK ID: ', i, 'VALUE: ', RANDOM_CHUNK(i+1)
+      !print *, 'RANDOM_CHUNK ID: ', i, 'VALUE: ', RANDOM_CHUNK(i+1)
    end do
 
 
    ! Boundary conditions for start and end of segments
 
    ! Sort the break points
-   call bubble_sort(RANDOM_CHUNK)
-   do i=0,Input_Opt%numCPUs
-      print *, 'Ordered RANDOM_CHUNK ID: ', i, 'VALUE: ', RANDOM_CHUNK(i+1)
-   end do
+   !call bubble_sort(RANDOM_CHUNK)
+
+   do i=2,Input_Opt%numCPUs
+      RANDOM_CHUNK(i) = RANDOM_CHUNK(i-1) + NCELL_LOCAL/(Input_Opt%numCPUs)
+   end do 
+   !do i=0,Input_Opt%numCPUs
+   !   print *, 'Ordered RANDOM_CHUNK ID: ', i, 'VALUE: ', RANDOM_CHUNK(i+1)
+   !end do
    ! Send segment lengths
 do i=0,Input_Opt%numCPUs-1
     Call MPI_Isend((RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1)), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
@@ -1139,11 +1143,9 @@ end do
 
 
     Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-   Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+    Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    
 do i=0,Input_Opt%numCPUs-1
-   print *,'This PET: ', this_PET, 'Send chunk number : ', RANDOM_CHUNK(i+1)
-   print *,'This PET: ', this_PET, 'Size of c_1D : ', SHAPE(C_1D),'Size of RCONST_1D',SHAPE(RCONST_1D), 'Size of ICNTRL_1D',SHAPE(ICNTRL_1D), 'Size of RCNTRL_1D',SHAPE(RCNTRL_1D)
     Call MPI_Isend(C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
     Call MPI_Isend(RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
     Call MPI_Isend(ICNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
@@ -1158,14 +1160,13 @@ do i=0,Input_Opt%numCPUs-1
     Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
     Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
     RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+    if (RECV_CUR > NCELL_MAX) then
+    print *,'NCELL_MAX: ', NCELL_MAX
+      print *, 'Exceeding maximum number of cell', RECV_CUR
+    endif
 end do
-   print *,'This PET: ', this_PET, 'Size of c_balanced : ', SHAPE(C_balanced),'Size of RCONST_balanced',SHAPE(RCONST_balanced), 'Size of ICNTRL_balanced',SHAPE(ICNTRL_balanced), 'Size of RCNTRL_balanced',SHAPE(RCNTRL_balanced)
-
-
-
-
-
-
+   !print *,'This PET: ', this_PET, 'Size of c_balanced : ', SHAPE(C_balanced),'Size of RCONST_balanced',SHAPE(RCONST_balanced), 'Size of ICNTRL_balanced',SHAPE(ICNTRL_balanced), 'Size of RCNTRL_balanced',SHAPE(RCNTRL_balanced)
+   !print *,'NCELL_LOCAL111: ', NCELL_LOCAL
 #endif
 
     !$OMP PARALLEL DO                                                        &
@@ -1183,8 +1184,10 @@ end do
     !$OMP COLLAPSE( 3                                                       )&
     !$OMP SCHEDULE( DYNAMIC, 24                                             )&
     !$OMP REDUCTION( +:errorCount                                           )
-    DO I_CELL = 1, NCELL_balanced
-
+    DO I_CELL = 1, RECV_CUR
+    if(I_CELL == RECV_CUR) then
+      print *, 'This Pet', this_PET, 'RECEIVE LENGTH: ', RECV_CUR, 'I_CELL number: ', I_CELL
+    end if
        ! Skip to the end of the loop if we have failed integration twice
        IF ( Failed2x ) CYCLE
 
@@ -1362,28 +1365,22 @@ end do
        C_balanced(:,I_CELL) = C(:)
        RCONST_balanced(:,I_CELL) = RCONST(:)
     ENDDO
-
     ! Reverse the load balancing
 #ifdef MODEL_GCHPCTM
-
-    ! Pass the actual arrays
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
-   if (i == 0) then
       Call MPI_Isend(C_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       Call MPI_Isend(RCONST_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       Call MPI_Isend(ISTATUS_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
       Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-   end if
 end do
-print *,'Finish sending back '
+print *,'Finish sending back, and send length:  ',SEND_CUR
 do i=0,Input_Opt%numCPUs-1
    Call MPI_Recv(C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    Call MPI_Recv(RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    Call MPI_Recv(ISTATUS_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    Call MPI_Recv(RSTATE_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-
 end do
 print *,'Finish receiving '
 
