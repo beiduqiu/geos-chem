@@ -219,7 +219,7 @@ CONTAINS
 
     ! All the KPP inputs remapped to a 1-D array
     INTEGER                :: NCELL, NCELL_local, I_CELL, NCELL_balanced
-    INTEGER                :: this_PET, prev_PET, next_PET, request, counter
+    INTEGER                :: this_PET, prev_PET, next_PET, request
 
     ! For tagged CO saving
     REAL(fp)               :: LCH4, PCO_TOT, PCO_CH4, PCO_NMVOC
@@ -271,7 +271,6 @@ CONTAINS
     errorCount =  0
     Failed2x   = .FALSE.
     doSuppress = .FALSE.
-    counter = 0
 
     ! Print information the first time that DO_FULLCHEM is called
     CALL PrintFirstTimeInfo( Input_Opt, State_Chm, FirstChem )
@@ -1413,8 +1412,7 @@ CONTAINS
 
           ! index of column on rank
           IF ( State_Diag%Archive_KppIndexOnRank ) THEN
-             State_Diag%KppIndexOnRank(I,J,L) = counter
-             counter = counter + 1
+             State_Diag%KppIndexOnRank(I,J,L) = N
           ENDIF
 
           ! Update autoreduce solver statistics
