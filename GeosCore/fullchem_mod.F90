@@ -271,6 +271,7 @@ CONTAINS
     errorCount =  0
     Failed2x   = .FALSE.
     doSuppress = .FALSE.
+    counter = 0
 
     ! Print information the first time that DO_FULLCHEM is called
     CALL PrintFirstTimeInfo( Input_Opt, State_Chm, FirstChem )
