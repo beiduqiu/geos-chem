@@ -219,7 +219,7 @@ CONTAINS
 
     ! All the KPP inputs remapped to a 1-D array
     INTEGER                :: NCELL, NCELL_local, I_CELL, NCELL_balanced
-    INTEGER                :: this_PET, prev_PET, next_PET, request
+    INTEGER                :: this_PET, prev_PET, next_PET, request, counter
 
     ! For tagged CO saving
     REAL(fp)               :: LCH4, PCO_TOT, PCO_CH4, PCO_NMVOC
@@ -1407,14 +1407,13 @@ CONTAINS
 
          ! rank of column
           IF ( State_Diag%Archive_KppRank ) THEN
-             ! @todo
-             State_Diag%KppRank(I,J,L) = 0
+             State_Diag%KppRank(I,J,L) = Input_Opt%thisCPU
           ENDIF
 
           ! index of column on rank
           IF ( State_Diag%Archive_KppIndexOnRank ) THEN
-             ! @todo
-             State_Diag%KppIndexOnRank(I,J,L) = 0
+             State_Diag%KppIndexOnRank(I,J,L) = counter
+             counter = counter + 1
           ENDIF
 
           ! Update autoreduce solver statistics
