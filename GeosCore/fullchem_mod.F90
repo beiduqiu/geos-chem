@@ -81,6 +81,11 @@ MODULE FullChem_Mod
   REAL(fP), ALLOCATABLE  :: cost_1D(:)
   REAL(fP), ALLOCATABLE  :: C_1D(:,:)
   REAL(fp), ALLOCATABLE  :: REARRANGED_C_1D(:,:)
+  REAL(fP), ALLOCATABLE  :: REARRANGED_RCONST_1D(:,:)
+  INTEGER,  ALLOCATABLE  :: REARRANGED_ICNTRL_1D(:,:)
+  REAL(fP), ALLOCATABLE  :: REARRANGED_RCNTRL_1D(:,:)
+  REAL(fP), ALLOCATABLE  :: REARRANGED_RSTATE_1D(:,:)
+  INTEGER,  ALLOCATABLE  :: REARRANGED_ISTATUS_1D(:,:)
   REAL(fP), ALLOCATABLE  :: RCONST_1D(:,:)
   INTEGER,  ALLOCATABLE  :: ICNTRL_1D(:,:)
   REAL(fP), ALLOCATABLE  :: RCNTRL_1D(:,:)
@@ -1115,14 +1120,18 @@ CONTAINS
     else
         prev_PET = this_PET - 1
     endif
-   call random_seed()
-   call RANDOM_NUMBER(REAL_RANDOM_CHUNK)
+   !call random_seed()
+   !call RANDOM_NUMBER(REAL_RANDOM_CHUNK)
    RANDOM_CHUNK(1) = 0
-   RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local-1
+   RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local
    do i=1, NCELL_local
       COLUMN_assignment(i)%first = i
       COLUMN_assignment(i)%second = mod(i,Input_Opt%numCPUs)
    end do
+   !open a csv file to write the column assignment
+   
+
+
    do i=1, NCELL_local
     do j = 1, NCELL_local
       if (COLUMN_assignment(j)%second > COLUMN_assignment(j+1)%second) then
@@ -1133,38 +1142,29 @@ CONTAINS
       end if
     end do
    end do
-   
+
    L = 2
-   do  j = 1, NCELL_local
-      if(COLUMN_assignment(j)%second < COLUMN_assignment(j+1)%second) then
-         RANDOM_CHUNK(L) = J
+   do  I_CELL = 1, NCELL_local
+      if(COLUMN_assignment(I_CELL)%second < COLUMN_assignment(I_CELL+1)%second) then
+         RANDOM_CHUNK(L) = I_CELL
          L = L+1
       end if
+
       do i =1, NSPEC
          !print*, 'Debug value of i: ',i, 'Column assignemnt id: ', COLUMN_assignment(j)%first
-         REARRANGED_C_1D(i,j) = C_1D(i,COLUMN_assignment(j)%first)
+         REARRANGED_C_1D(i,I_CELL) = C_1D(i,COLUMN_assignment(I_CELL)%first)
+      end do
+      do i=1, NREACT
+         REARRANGED_RCONST_1D(i,I_CELL) = RCONST_1D(i,COLUMN_assignment(I_CELL)%first)
+      end do
+      do i=1, 20
+         REARRANGED_ICNTRL_1D(i,I_CELL) = ICNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
+         REARRANGED_RCNTRL_1D(i,I_CELL) = RCNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
       end do
    end do
-   print *, 'RANDOM chunk length: ', L
-   ! Break points
-   !do i=0,Input_Opt%numCPUs-2
-   !   REAL_RANDOM_CHUNK(i+1) = REAL_RANDOM_CHUNK(i+1) * (NCELL_local-2) +1
-   !   RANDOM_CHUNK(i+2) = int(REAL_RANDOM_CHUNK(i+1))
-      !print *, 'RANDOM_CHUNK ID: ', i, 'VALUE: ', RANDOM_CHUNK(i+1)
-   !end do
 
-   ! Boundary conditions for start and end of segments
 
-   ! Sort the break points
-   !call bubble_sort(RANDOM_CHUNK)
 
-   !do i=2,Input_Opt%numCPUs
-   !   RANDOM_CHUNK(i) = RANDOM_CHUNK(i-1) + NCELL_local/(Input_Opt%numCPUs)
-   !end do 
-   !do i=0,Input_Opt%numCPUs
-   !   print *, 'Ordered RANDOM_CHUNK ID: ', i, 'VALUE: ', RANDOM_CHUNK(i+1)
-   !end do
-   ! Send segment lengths
 do i=0,Input_Opt%numCPUs-1
     Call MPI_Isend((RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1)), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
 end do
@@ -1173,16 +1173,14 @@ end do
 do i=0,Input_Opt%numCPUs-1
     Call MPI_Recv(RECV_LEN(i+1),1,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 end do
-
-
     Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
     Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    
 do i=0,Input_Opt%numCPUs-1
     Call MPI_Isend(REARRANGED_C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Isend(RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Isend(ICNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Isend(RCNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+    Call MPI_Isend(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+    Call MPI_Isend(REARRANGED_ICNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+    Call MPI_Isend(REARRANGED_RCNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
 end do
 
 ! Recv segments
@@ -1198,7 +1196,6 @@ do i=0,Input_Opt%numCPUs-1
       print *, 'Exceeding maximum number of cell', RECV_CUR
     endif
 end do
-   !print *,'This PET: ', this_PET, 'Size of c_balanced : ', SHAPE(C_balanced),'Size of RCONST_balanced',SHAPE(RCONST_balanced), 'Size of ICNTRL_balanced',SHAPE(ICNTRL_balanced), 'Size of RCNTRL_balanced',SHAPE(RCNTRL_balanced)
 #endif
 
     !$OMP PARALLEL DO                                                        &
@@ -1217,9 +1214,6 @@ end do
     !$OMP SCHEDULE( DYNAMIC, 24                                             )&
     !$OMP REDUCTION( +:errorCount                                           )
     DO I_CELL = 1, RECV_CUR
-    if(I_CELL == RECV_CUR) then
-      print *, 'This Pet', this_PET, 'RECEIVE LENGTH: ', RECV_CUR, 'I_CELL number: ', I_CELL
-    end if
        ! Skip to the end of the loop if we have failed integration twice
        IF ( Failed2x ) CYCLE
 
@@ -1407,17 +1401,33 @@ do i=0,Input_Opt%numCPUs-1
       Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       SEND_CUR = SEND_CUR + RECV_LEN(i+1)
 end do
-print *,'Finish sending back, and send length:  ',SEND_CUR
+
+!do i=0,Input_Opt%numCPUs-1
+!   Call MPI_Recv(C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+!   Call MPI_Recv(RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+!   Call MPI_Recv(ISTATUS_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+!   Call MPI_Recv(RSTATE_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+!end do
 do i=0,Input_Opt%numCPUs-1
    Call MPI_Recv(REARRANGED_C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-   Call MPI_Recv(RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-   Call MPI_Recv(ISTATUS_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-   Call MPI_Recv(RSTATE_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(REARRANGED_ISTATUS_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(REARRANGED_RSTATE_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 end do
-print *,'Finish receiving '
-do i=1, NCELL_local
 
+do i = 1, NCELL_local
+      do j = 1, NSPEC
+         C_1D(j,COLUMN_assignment(i)%first) = REARRANGED_C_1D(j,i)
+      end do
+      do j = 1, NREACT
+         RCONST_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCONST_1D(j,i)
+      end do
+      do j=1, 20
+         ICNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_ICNTRL_1D(j,i)
+         RCNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCNTRL_1D(j,i)
+      end do
 end do
+
 #endif
     
     DO L = 1, State_Grid%NZ
@@ -3038,6 +3048,36 @@ end do
         CALL GC_Error( 'Failed to allocate REARRANGED_C_1D', RC, ThisLoc )
         RETURN
     End If
+    Allocate(REARRANGED_RCONST_1D (NREACT,NCELL_max), STAT=RC)
+    CALL GC_CheckVar( 'fullchem_mod.F90:RCONST_1D', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate RCONST_1D', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(REARRANGED_ISTATUS_1D(20,NCELL_max)    , STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:ISTATUS_1D', 0, RC )
+      IF ( RC /= GC_SUCCESS ) Then
+          CALL GC_Error( 'Failed to allocate ISTATUS_1D', RC, ThisLoc )
+          RETURN
+      End If
+   Allocate(REARRANGED_RSTATE_1D (20,NCELL_max)    , STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RSTATE_1D', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate REARRANGED_RSTATE_1D', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(REARRANGED_ICNTRL_1D (20,NCELL_max)    , STAT=RC)
+    CALL GC_CheckVar( 'fullchem_mod.F90:ICNTRL_1D', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate ICNTRL_1D', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(REARRANGED_RCNTRL_1D (20,NCELL_max)    , STAT=RC)
+    CALL GC_CheckVar( 'fullchem_mod.F90:RCNTRL_1D', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate RCNTRL_1D', RC, ThisLoc )
+        RETURN
+    End If
     Allocate(RCONST_1D (NREACT,NCELL_max), STAT=RC)
     CALL GC_CheckVar( 'fullchem_mod.F90:RCONST_1D', 0, RC )
     IF ( RC /= GC_SUCCESS ) Then
@@ -3220,6 +3260,23 @@ end do
        CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_C_1D', 2, RC )
        IF ( RC /= GC_SUCCESS ) RETURN
     ENDIF
+    If ( ALLOCATED( REARRANGED_RCONST_1D ) ) Then
+      Deallocate(RCONST_1D, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:RCONST_1D', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
+
+   If ( ALLOCATED( REARRANGED_ICNTRL_1D ) ) Then
+      Deallocate(ICNTRL_1D, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:ICNTRL_1D', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
+
+   If ( ALLOCATED( REARRANGED_RCNTRL_1D ) ) Then
+      Deallocate(RCNTRL_1D, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:RCNTRL_1D', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
 
     If ( ALLOCATED( RCONST_1D ) ) Then
        Deallocate(RCONST_1D, STAT=RC)
