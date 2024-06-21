@@ -88,7 +88,26 @@ MODULE FullChem_Mod
   REAL(fP), ALLOCATABLE  :: RCNTRL_balanced(:,:)
   INTEGER,  ALLOCATABLE  :: ISTATUS_balanced(:,:)
   REAL(fP), ALLOCATABLE  :: RSTATE_balanced(:,:)
-
+  !newly added
+  TYPE :: column_assignment_pair
+   integer :: first
+   integer :: second
+  END TYPE  column_assignment_pair
+  INTEGER                :: ios
+  REAL(fp), ALLOCATABLE  :: REARRANGED_C_1D(:,:)
+  REAL(fP), ALLOCATABLE  :: REARRANGED_RCONST_1D(:,:)
+  INTEGER,  ALLOCATABLE  :: REARRANGED_ICNTRL_1D(:,:)
+  REAL(fP), ALLOCATABLE  :: REARRANGED_RCNTRL_1D(:,:)
+  REAL(fP), ALLOCATABLE  :: REARRANGED_RSTATE_1D(:,:)
+  INTEGER,  ALLOCATABLE  :: REARRANGED_ISTATUS_1D(:,:)
+  INTEGER,  ALLOCATABLE  :: RECV_LEN(:)
+  INTEGER,  ALLOCATABLE  :: RANDOM_CHUNK(:)
+  REAL(fp), ALLOCATABLE  :: REAL_RANDOM_CHUNK(:)
+  TYPE(column_assignment_pair), ALLOCATABLE :: COLUMN_assignment(:)
+  INTEGER,  ALLOCATABLE  :: assignments(:,:)
+  character(len=200000) :: line
+  character(len=1) :: delimiter
+  integer :: unit_number, read_count
 CONTAINS
 !EOC
 !------------------------------------------------------------------------------
@@ -188,6 +207,8 @@ CONTAINS
     INTEGER                :: errorCount
     REAL(fp)               :: SO4_FRAC,   T,         TIN
     REAL(fp)               :: TOUT,       SR,        LWC
+    INTEGER                :: SEND_CUR, RECV_CUR
+    TYPE(column_assignment_pair) :: Pair_temp
 
     ! Strings
     CHARACTER(LEN=63)      :: OrigUnit
@@ -1105,18 +1126,108 @@ CONTAINS
     else
         prev_PET = this_PET - 1
     endif
+    RANDOM_CHUNK(1) = 0
+    RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local
+    do i=1, NCELL_local
+       COLUMN_assignment(i)%first = i
+       COLUMN_assignment(i)%second = mod(i,Input_Opt%numCPUs)
+    end do
+    do i=1, NCELL_local
+      do j = 1, NCELL_local
+        if (COLUMN_assignment(j)%second > COLUMN_assignment(j+1)%second) then
+          ! Swap the elements
+          Pair_temp = COLUMN_assignment(j)
+          COLUMN_assignment(j) = COLUMN_assignment(j+1)
+          COLUMN_assignment(j+1) = Pair_temp
+        end if
+      end do
+     end do
+
+      L = 2
+      do  I_CELL = 1, NCELL_local
+         if(COLUMN_assignment(I_CELL)%second < COLUMN_assignment(I_CELL+1)%second) then
+            RANDOM_CHUNK(L) = I_CELL
+            L = L+1
+         end if
+
+         do i =1, NSPEC
+            !print*, 'Debug value of i: ',i, 'Column assignemnt id: ', COLUMN_assignment(j)%first
+            REARRANGED_C_1D(i,I_CELL) = C_1D(i,COLUMN_assignment(I_CELL)%first)
+         end do
+         do i=1, NREACT
+            REARRANGED_RCONST_1D(i,I_CELL) = RCONST_1D(i,COLUMN_assignment(I_CELL)%first)
+         end do
+         do i=1, 20
+            REARRANGED_ICNTRL_1D(i,I_CELL) = ICNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
+            REARRANGED_RCNTRL_1D(i,I_CELL) = RCNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
+         end do
+      end do
+      ! !read the file
+      ! if (read_count==0 ) then
+      !    print *, 'Reading the file for :', read_count, ' times'
+      !    delimiter = ','
+      !    unit_number = 10
+      !    read_count = 1
+      !    open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/greedy.csv', status='old', action='read', iostat=ios)
+      !    if (ios /= 0) then
+      !        print *, 'Error opening the file.'
+      !        stop
+      !    end if
+     
+      !    do i = 1, Input_Opt%numCPUs
+      !        read(unit_number, '(A)', iostat=ios) line
+      !        if (ios /= 0) exit
+      !        if(i==Input_Opt%thisCPU+1) Then
+      !          call parse_line(line, assignments(i, :), delimiter)
+      !        end if
+             
+      !    end do
+     
+      !    close(unit_number)
+     
+      !    ! Print the array to verify
+      !    do i = 1, Input_Opt%numCPUs
+      !       if(i==Input_Opt%thisCPU+1) Then
+      !        write(*,*) (assignments(i, j), j=1, NCELL_local)
+      !       end if
+      !    end do
+      ! end if
+         
+      !Send segment lengths
+      do i=0,Input_Opt%numCPUs-1
+         Call MPI_Isend((RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1)), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+     end do
+     
+     ! Recv segment lengths
+     do i=0,Input_Opt%numCPUs-1
+         Call MPI_Recv(RECV_LEN(i+1),1,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+     end do
+
     ! How many cells are to be processed?
-    Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+    !Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
+    !Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
     ! Pass the actual data
-    Call MPI_Isend(C_1D(1,1),NCELL_local*NSPEC,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(C_balanced(1,1),NCELL_balanced*NSPEC,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RCONST_1D(1,1),NCELL_local*NREACT,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RCONST_balanced(1,1),NCELL_balanced*NREACT,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(ICNTRL_1D(1,1),NCELL_local*20,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(ICNTRL_balanced(1,1),NCELL_balanced*20,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RCNTRL_1D(1,1),NCELL_local*20,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RCNTRL_balanced(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+     do i=0,Input_Opt%numCPUs-1
+      !print *,'Updated version of the code'
+      Call MPI_Isend(REARRANGED_C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(REARRANGED_ICNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(REARRANGED_RCNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+  end do
+  
+  ! Recv segments
+  RECV_CUR = 1
+  do i=0,Input_Opt%numCPUs-1
+      Call MPI_Recv(C_balanced(1,RECV_CUR), RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+      Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+      Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+      Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+      RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+      if (RECV_CUR > NCELL_MAX) then
+      print *,'NCELL_MAX: ', NCELL_MAX
+        print *, 'Exceeding maximum number of cell', RECV_CUR
+      endif
+  end do
 #endif
 
     !$OMP PARALLEL DO                                                        &
@@ -1134,7 +1245,7 @@ CONTAINS
     !$OMP COLLAPSE( 3                                                       )&
     !$OMP SCHEDULE( DYNAMIC, 24                                             )&
     !$OMP REDUCTION( +:errorCount                                           )
-    DO I_CELL = 1, NCELL_balanced
+    DO I_CELL = 1, RECV_CUR
 
        ! Skip to the end of the loop if we have failed integration twice
        IF ( Failed2x ) CYCLE
@@ -1316,16 +1427,34 @@ CONTAINS
 
     ! Reverse the load balancing
 #ifdef MODEL_GCHPCTM
-    ! Pass the actual arrays
-    Call MPI_Isend(C_balanced(1,1),NCELL_balanced*NSPEC,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(C_1D(1,1),NCELL_local*NSPEC,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    ! The rest are needed for diagnostics only
-    Call MPI_Isend(ISTATUS_balanced(1,1),NCELL_balanced*20,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(ISTATUS_1D(1,1),NCELL_local*20,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RSTATE_balanced(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RSTATE_1D(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RCONST_balanced(1,1),NCELL_balanced*NREACT,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RCONST_1D(1,1),NCELL_local*NREACT,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+SEND_CUR = 1
+do i=0,Input_Opt%numCPUs-1
+      Call MPI_Isend(C_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(RCONST_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(ISTATUS_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+end do
+do i=0,Input_Opt%numCPUs-1
+   Call MPI_Recv(REARRANGED_C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(REARRANGED_ISTATUS_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(REARRANGED_RSTATE_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+end do
+
+do i = 1, NCELL_local
+      do j = 1, NSPEC
+         C_1D(j,COLUMN_assignment(i)%first) = REARRANGED_C_1D(j,i)
+      end do
+      do j = 1, NREACT
+         RCONST_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCONST_1D(j,i)
+      end do
+      do j=1, 20
+         ICNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_ICNTRL_1D(j,i)
+         RCNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCNTRL_1D(j,i)
+      end do
+end do
+
 #endif
     
     DO L = 1, State_Grid%NZ
@@ -1811,6 +1940,32 @@ CONTAINS
     FIRSTCHEM = .FALSE.
 
   END SUBROUTINE Do_FullChem
+
+  subroutine parse_line(line, row, delimiter)
+   character(len=*), intent(in) :: line
+   INTEGER, intent(out) :: row(:)
+   character(len=1), intent(in) :: delimiter
+   integer :: i, j, start, len, iunit
+   character(len=3*NCELL_MAX) :: temp
+
+   i = 1
+   j = 1
+   start = 1
+
+   do while (i <= len_trim(line))
+       if (line(i:i) == delimiter .or. i == len_trim(line)) then
+           if (i == len_trim(line)) then
+               temp = line(start:i)
+           else
+               temp = line(start:i-1)
+           end if
+           read(temp, *) row(j)
+           j = j + 1
+           start = i + 1
+       end if
+       i = i + 1
+   end do
+end subroutine parse_line
 !EOC
 !------------------------------------------------------------------------------
 !                  GEOS-Chem Global Chemical Transport Model                  !
@@ -2995,7 +3150,72 @@ CONTAINS
         CALL GC_Error( 'Failed to allocate RSTATE_balanced', RC, ThisLoc )
         RETURN
     End If
-
+    Allocate(REARRANGED_C_1D      (NSPEC,NCELL_max) , STAT=RC)
+    CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_C_1D', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate REARRANGED_C_1D', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(REARRANGED_RCONST_1D (NREACT,NCELL_max), STAT=RC)
+    CALL GC_CheckVar( 'fullchem_mod.F90:RCONST_1D', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate RCONST_1D', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(REARRANGED_ISTATUS_1D(20,NCELL_max)    , STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:ISTATUS_1D', 0, RC )
+      IF ( RC /= GC_SUCCESS ) Then
+          CALL GC_Error( 'Failed to allocate ISTATUS_1D', RC, ThisLoc )
+          RETURN
+      End If
+   Allocate(REARRANGED_RSTATE_1D (20,NCELL_max)    , STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RSTATE_1D', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate REARRANGED_RSTATE_1D', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(REARRANGED_ICNTRL_1D (20,NCELL_max)    , STAT=RC)
+    CALL GC_CheckVar( 'fullchem_mod.F90:ICNTRL_1D', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate ICNTRL_1D', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(REARRANGED_RCNTRL_1D (20,NCELL_max)    , STAT=RC)
+    CALL GC_CheckVar( 'fullchem_mod.F90:RCNTRL_1D', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate RCNTRL_1D', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(RANDOM_CHUNK(Input_Opt%numCPUs+1), STAT=RC)
+    Call GC_CheckVar( 'fullchem_mod.F90:RANDOM_CHUNK', 0, RC )
+    IF ( RC /= GC_SUCCESS ) Then
+        CALL GC_Error( 'Failed to allocate RANDOM_CHUNK', RC, ThisLoc )
+        RETURN
+    End If
+    Allocate(REAL_RANDOM_CHUNK(Input_Opt%numCPUs-1), STAT=RC)
+   Call GC_CheckVar( 'fullchem_mod.F90:REAL_RANDOM_CHUNK', 0, RC )
+   IF ( RC /= GC_SUCCESS ) Then
+         CALL GC_Error( 'Failed to allocate REAL_RANDOM_CHUNK', RC, ThisLoc )
+         RETURN
+   End If
+   Allocate(RECV_LEN(Input_Opt%numCPUs), STAT=RC)
+   Call GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 0, RC )
+   IF ( RC /= GC_SUCCESS ) Then
+         CALL GC_Error( 'Failed to allocate RECV_LEN', RC, ThisLoc )
+         RETURN
+   End If
+   Allocate(COLUMN_assignment(NCELL_MAX), STAT=RC)
+   Call GC_CheckVar( 'fullchem_mod.F90:COLUMN_assignment', 0, RC )
+   IF ( RC /= GC_SUCCESS ) Then
+         CALL GC_Error( 'Failed to allocate COLUMN_assignment', RC, ThisLoc )
+         RETURN
+   End If
+   Allocate(assignments(Input_Opt%numCPUs,NCELL_MAX), STAT=RC)
+   Call GC_CheckVar( 'fullchem_mod.F90:assignments', 0, RC )
+   IF ( RC /= GC_SUCCESS ) Then
+         CALL GC_Error( 'Failed to allocate assignments', RC, ThisLoc )
+         RETURN
+   End If
   END SUBROUTINE Init_FullChem
 !EOC
 !------------------------------------------------------------------------------
@@ -3148,7 +3368,53 @@ CONTAINS
        CALL GC_CheckVar( 'fullchem_mod.F90:RSTATE_balanced', 2, RC )
        IF ( RC /= GC_SUCCESS ) RETURN
     ENDIF
+    If ( ALLOCATED( REARRANGED_C_1D ) ) Then
+      Deallocate(REARRANGED_C_1D, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_C_1D', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
+   If ( ALLOCATED( REARRANGED_RCONST_1D ) ) Then
+     Deallocate(RCONST_1D, STAT=RC)
+     CALL GC_CheckVar( 'fullchem_mod.F90:RCONST_1D', 2, RC )
+     IF ( RC /= GC_SUCCESS ) RETURN
+  ENDIF
 
+  If ( ALLOCATED( REARRANGED_ICNTRL_1D ) ) Then
+     Deallocate(ICNTRL_1D, STAT=RC)
+     CALL GC_CheckVar( 'fullchem_mod.F90:ICNTRL_1D', 2, RC )
+     IF ( RC /= GC_SUCCESS ) RETURN
+  ENDIF
+
+  If ( ALLOCATED( REARRANGED_RCNTRL_1D ) ) Then
+     Deallocate(RCNTRL_1D, STAT=RC)
+     CALL GC_CheckVar( 'fullchem_mod.F90:RCNTRL_1D', 2, RC )
+     IF ( RC /= GC_SUCCESS ) RETURN
+  ENDIF
+    IF(ALLOCATED(RANDOM_CHUNK)) THEN
+      DEALLOCATE(RANDOM_CHUNK, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:RANDOM_CHUNK', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+     ENDIF
+  IF(ALLOCATED(REAL_RANDOM_CHUNK)) THEN
+      DEALLOCATE(REAL_RANDOM_CHUNK, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:REAL_RANDOM_CHUNK', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+     ENDIF
+  IF(ALLOCATED(RECV_LEN)) THEN
+      DEALLOCATE(RECV_LEN, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+     ENDIF
+  IF(ALLOCATED(COLUMN_assignment)) THEN
+      DEALLOCATE(COLUMN_assignment, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:COLUMN_assignment', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+     ENDIF
+     IF(ALLOCATED(assignments)) THEN
+      DEALLOCATE(assignments, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:assignments', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+     ENDIF
   END SUBROUTINE Cleanup_FullChem
 !EOC
 END MODULE FullChem_Mod
