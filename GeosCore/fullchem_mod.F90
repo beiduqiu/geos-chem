@@ -1126,12 +1126,45 @@ CONTAINS
     else
         prev_PET = this_PET - 1
     endif
-    RANDOM_CHUNK(1) = 0
+    RANDOM_CHUNK(1) = 1
     RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local
-    do i=1, NCELL_local
-       COLUMN_assignment(i)%first = i
-       COLUMN_assignment(i)%second = mod(i,Input_Opt%numCPUs)
-    end do
+    !read the file
+    !if (read_count == 0 ) then
+      print *, 'Reading the file for :', read_count, ' times'
+      delimiter = ','
+      unit_number = 10
+      read_count = 1
+      open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/greedy.csv', status='old', action='read', iostat=ios)
+      if (ios /= 0) then
+          print *, 'Error opening the file.'
+          stop
+      end if
+
+      do i = 1, Input_Opt%numCPUs
+          read(unit_number, '(A)', iostat=ios) line
+          if (ios /= 0) exit
+          if(i==Input_Opt%thisCPU+1) Then
+            call parse_line(line, assignments(i, :), delimiter)
+          end if
+      end do
+
+      close(unit_number)
+      ! Print the array to verify
+      ! do i = 1, Input_Opt%numCPUs
+      !    if(i==Input_Opt%thisCPU+1) Then
+      !     write(*,*) (assignments(i, j), j=1, NCELL_local)
+      !    end if
+      ! end do
+   !end if
+      print *, 'random assignment'
+   do i=1, NCELL_local
+      COLUMN_assignment(i)%first = i
+      COLUMN_assignment(i)%second = assignments(Input_Opt%thisCPU+1, i)
+   end do
+     do i=1, NCELL_local
+        COLUMN_assignment(i)%first = i
+        COLUMN_assignment(i)%second = mod(i,Input_Opt%numCPUs)
+     end do
     do i=1, NCELL_local
       do j = 1, NCELL_local
         if (COLUMN_assignment(j)%second > COLUMN_assignment(j+1)%second) then
@@ -1162,6 +1195,7 @@ CONTAINS
             REARRANGED_RCNTRL_1D(i,I_CELL) = RCNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
          end do
       end do
+      
       !Send segment lengths
       do i=0,Input_Opt%numCPUs-1
          Call MPI_Isend((RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1)), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
@@ -1191,10 +1225,8 @@ CONTAINS
          endif
    end do
 
-   print *, 'newest version of the code 1'
 
    do i=0,Input_Opt%numCPUs-1
-
       Call MPI_Isend(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
    end do
    RECV_CUR = 1
