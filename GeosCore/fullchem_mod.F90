@@ -1156,15 +1156,14 @@ CONTAINS
       !    end if
       ! end do
    !end if
-      print *, 'random assignment'
    do i=1, NCELL_local
       COLUMN_assignment(i)%first = i
       COLUMN_assignment(i)%second = assignments(Input_Opt%thisCPU+1, i)
    end do
-     do i=1, NCELL_local
-        COLUMN_assignment(i)%first = i
-        COLUMN_assignment(i)%second = mod(i,Input_Opt%numCPUs)
-     end do
+   !  do i=1, NCELL_local
+   !     COLUMN_assignment(i)%first = i
+   !     COLUMN_assignment(i)%second = mod(i,Input_Opt%numCPUs)
+   !  end do
     do i=1, NCELL_local
       do j = 1, NCELL_local
         if (COLUMN_assignment(j)%second > COLUMN_assignment(j+1)%second) then
