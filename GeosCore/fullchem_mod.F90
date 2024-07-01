@@ -1133,7 +1133,7 @@ CONTAINS
       print *, 'Reading the file for :', read_count, ' times'
       delimiter = ','
       unit_number = 10
-      read_count = 1
+      read_count = read_count + 1
       open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/greedy.csv', status='old', action='read', iostat=ios)
       if (ios /= 0) then
           print *, 'Error opening the file.'
@@ -1212,11 +1212,17 @@ CONTAINS
      do i=0,Input_Opt%numCPUs-1
       !print *,'Updated version of the code'
       Call MPI_Isend(REARRANGED_C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(REARRANGED_ICNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(REARRANGED_RCNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       end do
    ! Recv segments
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
          Call MPI_Recv(C_balanced(1,RECV_CUR), RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+         Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+         Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+         Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
          RECV_CUR = RECV_CUR+RECV_LEN(i+1)
          if (RECV_CUR > NCELL_MAX) then
             print *,'NCELL_MAX: ', NCELL_MAX
@@ -1225,30 +1231,30 @@ CONTAINS
    end do
 
 
-   do i=0,Input_Opt%numCPUs-1
-      Call MPI_Isend(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-   end do
-   RECV_CUR = 1
-   do i=0,Input_Opt%numCPUs-1
-      Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-      RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-   end do
-   do i=0,Input_Opt%numCPUs-1
-      Call MPI_Isend(REARRANGED_ICNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
-   end do
-   RECV_CUR = 1
-   do i=0,Input_Opt%numCPUs-1
-      Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-      RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-   end do
-   do i=0,Input_Opt%numCPUs-1
-      Call MPI_Isend(REARRANGED_RCNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-   end do
-   RECV_CUR = 1
-   do i=0,Input_Opt%numCPUs-1
-      Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-      RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-   end do
+   ! do i=0,Input_Opt%numCPUs-1
+   !    Call MPI_Isend(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+   ! end do
+   ! RECV_CUR = 1
+   ! do i=0,Input_Opt%numCPUs-1
+   !    Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   !    RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+   ! end do
+   ! do i=0,Input_Opt%numCPUs-1
+   !    Call MPI_Isend(REARRANGED_ICNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+   ! end do
+   ! RECV_CUR = 1
+   ! do i=0,Input_Opt%numCPUs-1
+   !    Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   !    RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+   ! end do
+   ! do i=0,Input_Opt%numCPUs-1
+   !    Call MPI_Isend(REARRANGED_RCNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+   ! end do
+   ! RECV_CUR = 1
+   ! do i=0,Input_Opt%numCPUs-1
+   !    Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   !    RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+   ! end do
 
 
  
@@ -1454,35 +1460,41 @@ CONTAINS
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
       Call MPI_Isend(C_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(RCONST_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(ISTATUS_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+      Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
 end do
 do i=0,Input_Opt%numCPUs-1
    Call MPI_Recv(REARRANGED_C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-end do
-SEND_CUR = 1
-do i=0,Input_Opt%numCPUs-1
-   Call MPI_Isend(RCONST_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-   SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-end do
-do i=0,Input_Opt%numCPUs-1
-Call MPI_Recv(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-end do
-SEND_CUR = 1
-do i=0,Input_Opt%numCPUs-1
-   Call MPI_Isend(ISTATUS_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
-   SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-end do
-do i=0,Input_Opt%numCPUs-1
+   Call MPI_Recv(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    Call MPI_Recv(REARRANGED_ISTATUS_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-end do
-SEND_CUR = 1
-do i=0,Input_Opt%numCPUs-1
-   Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-   SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-end do
-do i=0,Input_Opt%numCPUs-1
    Call MPI_Recv(REARRANGED_RSTATE_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 end do
+! SEND_CUR = 1
+! do i=0,Input_Opt%numCPUs-1
+   
+!    SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+! end do
+! do i=0,Input_Opt%numCPUs-1
+
+! end do
+! SEND_CUR = 1
+! do i=0,Input_Opt%numCPUs-1
+   
+!    SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+! end do
+! do i=0,Input_Opt%numCPUs-1
+
+! end do
+! SEND_CUR = 1
+! do i=0,Input_Opt%numCPUs-1
+   
+!    SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+! end do
+! do i=0,Input_Opt%numCPUs-1
+   
+! end do
 do i = 1, NCELL_local
       do j = 1, NSPEC
          C_1D(j,COLUMN_assignment(i)%first) = REARRANGED_C_1D(j,i)
