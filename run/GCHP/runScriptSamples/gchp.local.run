@@ -14,12 +14,12 @@ start_str=$(sed 's/ /_/g' cap_restart)
 log=gchp.${start_str:0:13}z.log
 
 # Load environment
-if [ ! -L gchp.env ] || [ ! -e gchp.env ]; then
-   echo "ERROR: gchp.env symbolic link not valid. Set using setEnvironment.sh."
-   exit 1
-else
-   source gchp.env > ${log}
-fi
+# if [ ! -L gchp.env ] || [ ! -e gchp.env ]; then
+#    echo "ERROR: gchp.env symbolic link not valid. Set using setEnvironment.sh."
+#    exit 1
+# else
+#    source gchp.env > ${log}
+# fi
 
 # Update config files, set restart symlink, and do sanity checks
 source setCommonRunSettings.sh --verbose 2>&1 | tee ${log}
@@ -32,7 +32,7 @@ nCores=$( grep -oP 'TOTAL_CORES=\s*\K\d+' setCommonRunSettings.sh )
 #--------------------------------------------------
 # Edit this line to run GCHP on your system
 #--------------------------------------------------
-time mpirun -np ${nCores} ./gchp 2>&1 | tee -a ${log}
+time mpirun -np ${nCores} --oversubscribe {$HOME}/GCHP_washu/build/bin/gchp 2>&1 | tee -a ${log}
 
 # Rename mid-run checkpoint files, if any. Discard file if time corresponds
 # to run start time since duplicate with initial restart file.
