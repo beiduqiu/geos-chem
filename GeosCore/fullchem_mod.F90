@@ -102,12 +102,14 @@ MODULE FullChem_Mod
    INTEGER,  ALLOCATABLE  :: REARRANGED_ISTATUS_1D(:,:)
    INTEGER,  ALLOCATABLE  :: RECV_LEN(:)
    INTEGER,  ALLOCATABLE  :: RANDOM_CHUNK(:)
-   REAL(fp), ALLOCATABLE  :: REAL_RANDOM_CHUNK(:)
+   INTEGER,  ALLOCATABLE  :: SendColumnDistribution(:,:)
    TYPE(column_assignment_pair), ALLOCATABLE :: COLUMN_assignment(:)
    INTEGER,  ALLOCATABLE  :: assignments(:,:)
    character(len=200000) :: line
    character(len=1) :: delimiter
-   integer :: unit_number, read_count
+   INTEGER :: unit_number, read_count, SlotNumber
+   REAL :: TotalTime, InputSecs
+
 CONTAINS
 !EOC
 !------------------------------------------------------------------------------
@@ -1130,12 +1132,17 @@ CONTAINS
       RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local
       !read the file
       !if (read_count == 0 ) then
-
+      Call Timer_Add("Communication", RC)
+      CALL Timer_Start( TimerName = "Communication",                       &
+                              InLoop    = .TRUE.,                              &
+                              ThreadNum = Thread,                              &
+                              RC        = RC                                  )
       print *, 'Updated: Reading the file for :', read_count, ' times'
       delimiter = ','
       unit_number = 10
       read_count = read_count + 1
-      open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/24greedy.csv', status='old', action='read', iostat=ios)
+      !open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/original.csv', status='old', action='read', iostat=ios)
+      open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/reassign_greedy_15.csv', status='old', action='read', iostat=ios)
       if (ios /= 0) then
             print *, 'Error opening the file.'
             stop
@@ -1150,13 +1157,10 @@ CONTAINS
       end do
 
       close(unit_number)
-      ! Print the array to verify
-      ! do i = 1, Input_Opt%numCPUs
-      !    if(i==Input_Opt%thisCPU+1) Then
-      !     write(*,*) (assignments(i, j), j=1, NCELL_local)
-      !    end if
-      ! end do
-   !end if
+      do i=1, NCELL_local
+         COLUMN_assignment(i)%first = -1
+         COLUMN_assignment(i)%second = -1
+      end do
    do i=1, NCELL_local
       COLUMN_assignment(i)%first = i
       COLUMN_assignment(i)%second = assignments(Input_Opt%thisCPU+1, i)
@@ -1165,7 +1169,7 @@ CONTAINS
    !     COLUMN_assignment(i)%first = i
    !     COLUMN_assignment(i)%second = mod(i,Input_Opt%numCPUs)
    !  end do
-      do i=1, NCELL_local
+   do i=1, NCELL_local
       do j = 1, NCELL_local
          if (COLUMN_assignment(j)%second > COLUMN_assignment(j+1)%second) then
             ! Swap the elements
@@ -1174,13 +1178,32 @@ CONTAINS
             COLUMN_assignment(j+1) = Pair_temp
          end if
       end do
-      end do
+   end do
 
-      L = 2
+      print *, "THIS PET", this_PET,"First in column assignment: ", COLUMN_assignment(1)%second, "first11: ",COLUMN_assignment(1)%first
+
+
+      SendColumnDistribution = -1
+      j=-1
       do  I_CELL = 1, NCELL_local
-         if(COLUMN_assignment(I_CELL)%second < COLUMN_assignment(I_CELL+1)%second) then
-            RANDOM_CHUNK(L) = I_CELL
-            L = L+1
+         if(COLUMN_assignment(I_CELL)%second == (j-1)) Then
+               if(SendColumnDistribution(1,j) /= -1) THEN
+               SendColumnDistribution(2,j) = SendColumnDistribution(2,j) + 1
+            else
+               print *, "ERROR in generate sendcolumndistribution"
+            end if
+         else if (COLUMN_assignment(I_CELL)%second /= (j-1)) Then
+            j = COLUMN_assignment(I_CELL)%second + 1
+            !print *,"Current pet", this_PET,"Column assignment11: ",COLUMN_assignment(I_CELL)%second
+            if(SendColumnDistribution(1,j) == -1) THEN
+              !print *, "Current PET", this_PET,  "Communication: ", SendColumnDistribution(1,j),"----", SendColumnDistribution(2,j)
+               SendColumnDistribution(1,j) = I_CELL
+               SendColumnDistribution(2,j) = 1
+            ! else if(SendColumnDistribution(1,j) /= -1) THEN
+            !    SendColumnDistribution(2,j) = SendColumnDistribution(2,j) + 1
+            else
+               print *, "ERROR in generate sendcolumndistribution2"
+            end if
          end if
 
          do i =1, NSPEC
@@ -1195,10 +1218,10 @@ CONTAINS
             REARRANGED_RCNTRL_1D(i,I_CELL) = RCNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
          end do
       end do
-      
-      !Send segment lengths
+
+
       do i=0,Input_Opt%numCPUs-1
-         Call MPI_Isend((RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1)), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+         Call MPI_Isend(SendColumnDistribution(2,i+1), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
       end do
       
       ! Recv segment lengths
@@ -1212,61 +1235,75 @@ CONTAINS
       ! Pass the actual data
       do i=0,Input_Opt%numCPUs-1
       !print *,'Updated version of the code'
-         IF((RANDOM_CHUNK(i+2) - RANDOM_CHUNK(i+1)) /= 0) THEN
-            Call MPI_Isend(REARRANGED_C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+         IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET) THEN
+            Call MPI_Isend(REARRANGED_C_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
          ENDIF
       end do
    ! Recv segments
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
-      IF(RECV_LEN(i+1) /= 0) THEN
-         Call MPI_Recv(C_balanced(1,RECV_CUR), RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-         RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-         if (RECV_CUR > NCELL_MAX) then
-            print *,'NCELL_MAX: ', NCELL_MAX
-            print *, 'Exceeding maximum number of cell', RECV_CUR
+      IF(RECV_LEN(i+1) > 0) THEN
+         if(i==this_PET) Then
+            C_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)) = REARRANGED_C_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1))
+         else
+            Call MPI_Recv(C_balanced(1,RECV_CUR), RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+            if (RECV_CUR > NCELL_MAX) then
+               print *,'NCELL_MAX: ', NCELL_MAX
+               print *, 'Exceeding maximum number of cell', RECV_CUR
+            endif
          endif
+         
       ENDIF
    end do
 
 
    do i=0,Input_Opt%numCPUs-1
-      IF((RANDOM_CHUNK(i+2) - RANDOM_CHUNK(i+1)) /= 0) THEN
-         Call MPI_Isend(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      IF(SendColumnDistribution(1,i+1) /= -1) THEN
+         Call MPI_Isend(REARRANGED_RCONST_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       ENDIF
    end do
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
-      IF(RECV_LEN(i+1) /= 0) THEN
+      IF(RECV_LEN(i+1) > 0) THEN
          Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
          RECV_CUR = RECV_CUR+RECV_LEN(i+1)
       ENDIF
    end do
    do i=0,Input_Opt%numCPUs-1
-      IF((RANDOM_CHUNK(i+2) - RANDOM_CHUNK(i+1)) /= 0) THEN
-         Call MPI_Isend(REARRANGED_ICNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+      IF(SendColumnDistribution(1,i+1) /= -1) THEN
+         Call MPI_Isend(REARRANGED_ICNTRL_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
       ENDIF
    end do
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
-      IF(RECV_LEN(i+1) /= 0) THEN
+      IF(RECV_LEN(i+1) > 0) THEN
          Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
          RECV_CUR = RECV_CUR+RECV_LEN(i+1)
       ENDIF
    end do
    do i=0,Input_Opt%numCPUs-1
-      IF((RANDOM_CHUNK(i+2) - RANDOM_CHUNK(i+1)) /= 0) THEN
-         Call MPI_Isend(REARRANGED_RCNTRL_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      IF(SendColumnDistribution(1,i+1) /= -1) THEN
+         Call MPI_Isend(REARRANGED_RCNTRL_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       ENDIF
    end do
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
-   IF(RECV_LEN(i+1) /= 0) THEN
+   IF(RECV_LEN(i+1) > 0) THEN
       Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
       RECV_CUR = RECV_CUR+RECV_LEN(i+1)
    ENDIF
    end do
-
+   CALL Timer_End( TimerName = "Communication",                       &
+   InLoop    = .TRUE.,                              &
+   ThreadNum = Thread,                              &
+   RC        = RC                                  )
+   CALL Timer_Sum_Loop( "Communication",            RC )
+print *, 'Communication timer added'
+Call Timer_Print("Communication", RC)
+InputSecs = Timer_GetSecs("Communication", RC)
+TotalTime = TotalTime + InputSecs
+print *, 'Total time spent in communication: ', TotalTime
 
    
 #endif
@@ -1470,50 +1507,50 @@ CONTAINS
 #ifdef MODEL_GCHPCTM
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
-   IF(RECV_LEN(i+1) /= 0) THEN
+   IF(RECV_LEN(i+1) > 0) THEN
       Call MPI_Isend(C_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       SEND_CUR = SEND_CUR + RECV_LEN(i+1)
    ENDIF
 end do
 do i=0,Input_Opt%numCPUs-1
-   IF((RANDOM_CHUNK(i+2) - RANDOM_CHUNK(i+1)) /= 0) THEN
-   Call MPI_Recv(REARRANGED_C_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   IF(SendColumnDistribution(1,i+1) /= -1) THEN
+   Call MPI_Recv(REARRANGED_C_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 ENDIF
 end do
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
-IF(RECV_LEN(i+1) /= 0) THEN
+IF(RECV_LEN(i+1) > 0) THEN
    Call MPI_Isend(RCONST_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
    SEND_CUR = SEND_CUR + RECV_LEN(i+1)
 ENDIF
 end do
 do i=0,Input_Opt%numCPUs-1
-   IF((RANDOM_CHUNK(i+2) - RANDOM_CHUNK(i+1)) /= 0) THEN
-Call MPI_Recv(REARRANGED_RCONST_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   IF(SendColumnDistribution(1,i+1) /= -1) THEN
+Call MPI_Recv(REARRANGED_RCONST_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 ENDIF
 end do
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
-IF(RECV_LEN(i+1) /= 0) THEN
+IF(RECV_LEN(i+1) > 0) THEN
    Call MPI_Isend(ISTATUS_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
    SEND_CUR = SEND_CUR + RECV_LEN(i+1)
 ENDIF
 end do
 do i=0,Input_Opt%numCPUs-1
-   IF((RANDOM_CHUNK(i+2) - RANDOM_CHUNK(i+1)) /= 0) THEN
-   Call MPI_Recv(REARRANGED_ISTATUS_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   IF(SendColumnDistribution(1,i+1) /= -1) THEN
+   Call MPI_Recv(REARRANGED_ISTATUS_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 ENDIF
 end do
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
-IF(RECV_LEN(i+1) /= 0) THEN
+IF(RECV_LEN(i+1) > 0) THEN
    Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
    SEND_CUR = SEND_CUR + RECV_LEN(i+1)
 ENDIF
 end do
 do i=0,Input_Opt%numCPUs-1
-   IF((RANDOM_CHUNK(i+2) - RANDOM_CHUNK(i+1)) /= 0) THEN
-   Call MPI_Recv(REARRANGED_RSTATE_1D(1,RANDOM_CHUNK(i+1)),(RANDOM_CHUNK(i+2)-RANDOM_CHUNK(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   IF(SendColumnDistribution(1,i+1) /= -1) THEN
+   Call MPI_Recv(REARRANGED_RSTATE_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 ENDIF
 end do
 do i = 1, NCELL_local
@@ -3266,12 +3303,6 @@ end subroutine parse_line
          CALL GC_Error( 'Failed to allocate RANDOM_CHUNK', RC, ThisLoc )
          RETURN
       End If
-      Allocate(REAL_RANDOM_CHUNK(Input_Opt%numCPUs-1), STAT=RC)
-   Call GC_CheckVar( 'fullchem_mod.F90:REAL_RANDOM_CHUNK', 0, RC )
-   IF ( RC /= GC_SUCCESS ) Then
-         CALL GC_Error( 'Failed to allocate REAL_RANDOM_CHUNK', RC, ThisLoc )
-         RETURN
-   End If
    Allocate(RECV_LEN(Input_Opt%numCPUs), STAT=RC)
    Call GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 0, RC )
    IF ( RC /= GC_SUCCESS ) Then
@@ -3282,6 +3313,12 @@ end subroutine parse_line
    Call GC_CheckVar( 'fullchem_mod.F90:COLUMN_assignment', 0, RC )
    IF ( RC /= GC_SUCCESS ) Then
          CALL GC_Error( 'Failed to allocate COLUMN_assignment', RC, ThisLoc )
+         RETURN
+   End If
+   Allocate(SendColumnDistribution(2,Input_Opt%numCPUs),STAT=RC)
+   Call GC_CheckVar( 'fullchem_mod.F90:SendColumnDistribution', 0, RC )
+   IF ( RC /= GC_SUCCESS ) Then
+         CALL GC_Error( 'Failed to allocate SendColumnDistribution', RC, ThisLoc )
          RETURN
    End If
    Allocate(assignments(Input_Opt%numCPUs,NCELL_MAX), STAT=RC)
@@ -3469,11 +3506,6 @@ end subroutine parse_line
       CALL GC_CheckVar( 'fullchem_mod.F90:RANDOM_CHUNK', 2, RC )
       IF ( RC /= GC_SUCCESS ) RETURN
       ENDIF
-   IF(ALLOCATED(REAL_RANDOM_CHUNK)) THEN
-      DEALLOCATE(REAL_RANDOM_CHUNK, STAT=RC)
-      CALL GC_CheckVar( 'fullchem_mod.F90:REAL_RANDOM_CHUNK', 2, RC )
-      IF ( RC /= GC_SUCCESS ) RETURN
-      ENDIF
    IF(ALLOCATED(RECV_LEN)) THEN
       DEALLOCATE(RECV_LEN, STAT=RC)
       CALL GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 2, RC )
@@ -3498,7 +3530,12 @@ end subroutine parse_line
       DEALLOCATE(assignments, STAT=RC)
       CALL GC_CheckVar( 'fullchem_mod.F90:assignments', 2, RC )
       IF ( RC /= GC_SUCCESS ) RETURN
-      ENDIF
+      ENDIF 
+      IF(ALLOCATED(SendColumnDistribution)) THEN
+         DEALLOCATE(SendColumnDistribution, STAT=RC)
+         CALL GC_CheckVar( 'fullchem_mod.F90:SendColumnDistribution', 2, RC )
+         IF ( RC /= GC_SUCCESS ) RETURN
+         ENDIF
    END SUBROUTINE Cleanup_FullChem
 !EOC
 END MODULE FullChem_Mod

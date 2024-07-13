@@ -30,6 +30,7 @@ MODULE Timers_Mod
   PUBLIC  :: Timer_Print          ! Prints the specified timer
   PUBLIC  :: Timer_PrintAll       ! Prints all timers
   PUBLIC  :: Timer_StopAll        ! Stops all currently running timers
+  PUBLIC  :: Timer_GetSecs        ! Returns the current time in milliseconds
 !
 ! !PRIVATE MEMBER FUNCTIONS:
 !
@@ -84,6 +85,14 @@ MODULE Timers_Mod
   TYPE(GC_Timer), DIMENSION(TimerMaxSize) :: SavedTimers
 
 CONTAINS
+FUNCTION Timer_GetSecs( TimerName ) RESULT ( Secs )
+   CHARACTER(LEN=255), INTENT(IN) :: TimerName
+   REAL(f8)                 :: Secs
+   INTEGER                       :: SlotNumber
+   SlotNumber = Timer_Find(TimerName)
+   Secs = SavedTimers(SlotNumber)%TOTAL_TIME
+   RETURN
+END FUNCTION Timer_GetSecs
 !EOC
 !------------------------------------------------------------------------------
 !                  GEOS-Chem Global Chemical Transport Model                  !
