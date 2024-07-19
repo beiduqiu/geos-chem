@@ -20,6 +20,7 @@ MODULE GCHP_Chunk_Mod
   USE ESMF
   USE ErrCode_Mod
   USE Precision_Mod
+  USE Timers_Mod
 
   IMPLICIT NONE
   PRIVATE
@@ -1335,6 +1336,7 @@ CONTAINS
        endif
 
        ! Do chemistry
+       Call Timer_Add("Communication", RC)
        CALL Do_Chemistry( Input_Opt, State_Chm, State_Diag, &
                           State_Grid, State_Met, RC )
        _ASSERT(RC==GC_SUCCESS, 'Error calling Do_Chemistr')

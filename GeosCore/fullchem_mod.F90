@@ -107,6 +107,7 @@ MODULE FullChem_Mod
    INTEGER,  ALLOCATABLE  :: assignments(:,:)
    character(len=200000) :: line
    character(len=1) :: delimiter
+   character(len=200) :: assignmentPath,read_count_str
    INTEGER :: unit_number, read_count, SlotNumber
    REAL :: TotalTime, InputSecs
 
@@ -1132,7 +1133,7 @@ CONTAINS
       RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local
       !read the file
       !if (read_count == 0 ) then
-      Call Timer_Add("Communication", RC)
+      !Call Timer_Add("Communication", RC)
       CALL Timer_Start( TimerName = "Communication",                       &
                               InLoop    = .TRUE.,                              &
                               ThreadNum = Thread,                              &
@@ -1141,8 +1142,13 @@ CONTAINS
       delimiter = ','
       unit_number = 10
       read_count = read_count + 1
+      write(read_count_str, '(I0)') read_count / 6
+      !print *, "read count stirng: ", read_count_str
+      assignmentPath = '/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/dynamic_100/interval_' // trim(read_count_str) // '.csv'
+      !print *, "Assignment path: ", assignmentPath
+      assignments = -1
       !open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/original.csv', status='old', action='read', iostat=ios)
-      open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/reassign_greedy_15.csv', status='old', action='read', iostat=ios)
+      open(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=ios)
       if (ios /= 0) then
             print *, 'Error opening the file.'
             stop
@@ -1153,17 +1159,20 @@ CONTAINS
             if (ios /= 0) exit
             if(i==Input_Opt%thisCPU+1) Then
             call parse_line(line, assignments(i, :), delimiter)
+            !print *, "Current PET", this_PET, "Assignments: ", assignments(i, :)
             end if
       end do
 
       close(unit_number)
       do i=1, NCELL_local
          COLUMN_assignment(i)%first = -1
-         COLUMN_assignment(i)%second = -1
+         COLUMN_assignment(i)%second = Input_Opt%numCPUs+10
       end do
    do i=1, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1, i) /= -1) then      
       COLUMN_assignment(i)%first = i
       COLUMN_assignment(i)%second = assignments(Input_Opt%thisCPU+1, i)
+      end if
    end do
    !  do i=1, NCELL_local
    !     COLUMN_assignment(i)%first = i
@@ -1179,9 +1188,6 @@ CONTAINS
          end if
       end do
    end do
-
-      print *, "THIS PET", this_PET,"First in column assignment: ", COLUMN_assignment(1)%second, "first11: ",COLUMN_assignment(1)%first
-
 
       SendColumnDistribution = -1
       j=-1
@@ -1218,7 +1224,11 @@ CONTAINS
             REARRANGED_RCNTRL_1D(i,I_CELL) = RCNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
          end do
       end do
-
+      ! do i=1,Input_Opt%numCPUs
+      !    if(SendColumnDistribution(1,i) /= -1) then
+      !       print *, "Current PET", this_PET, "i:", i, "Communication: ", SendColumnDistribution(1,i),"----", SendColumnDistribution(2,i)
+      !    end if
+      ! end do
 
       do i=0,Input_Opt%numCPUs-1
          Call MPI_Isend(SendColumnDistribution(2,i+1), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
@@ -1229,9 +1239,7 @@ CONTAINS
          Call MPI_Recv(RECV_LEN(i+1),1,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
       end do
 
-      ! How many cells are to be processed?
-      !Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-      !Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+
       ! Pass the actual data
       do i=0,Input_Opt%numCPUs-1
       !print *,'Updated version of the code'
@@ -1244,7 +1252,8 @@ CONTAINS
    do i=0,Input_Opt%numCPUs-1
       IF(RECV_LEN(i+1) > 0) THEN
          if(i==this_PET) Then
-            C_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)) = REARRANGED_C_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1))
+            C_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_C_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
+            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
          else
             Call MPI_Recv(C_balanced(1,RECV_CUR), RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
             RECV_CUR = RECV_CUR+RECV_LEN(i+1)
@@ -1259,39 +1268,54 @@ CONTAINS
 
 
    do i=0,Input_Opt%numCPUs-1
-      IF(SendColumnDistribution(1,i+1) /= -1) THEN
+      IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
          Call MPI_Isend(REARRANGED_RCONST_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       ENDIF
    end do
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
       IF(RECV_LEN(i+1) > 0) THEN
-         Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-         RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+         if(i==this_PET) Then
+            RCONST_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_RCONST_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
+            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+         else
+            Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+         endif
       ENDIF
    end do
    do i=0,Input_Opt%numCPUs-1
-      IF(SendColumnDistribution(1,i+1) /= -1) THEN
+      IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
          Call MPI_Isend(REARRANGED_ICNTRL_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
       ENDIF
    end do
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
       IF(RECV_LEN(i+1) > 0) THEN
-         Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-         RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+         if(i==this_PET) Then
+            ICNTRL_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_ICNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
+            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+         else
+            Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+         endif
       ENDIF
    end do
    do i=0,Input_Opt%numCPUs-1
-      IF(SendColumnDistribution(1,i+1) /= -1) THEN
+      IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
          Call MPI_Isend(REARRANGED_RCNTRL_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
       ENDIF
    end do
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
    IF(RECV_LEN(i+1) > 0) THEN
-      Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-      RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+      if(i==this_PET) Then
+         RCNTRL_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_RCNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
+         RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+      else
+         Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+         RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+      endif
    ENDIF
    end do
    CALL Timer_End( TimerName = "Communication",                       &
@@ -1300,9 +1324,9 @@ CONTAINS
    RC        = RC                                  )
    CALL Timer_Sum_Loop( "Communication",            RC )
 print *, 'Communication timer added'
-Call Timer_Print("Communication", RC)
 InputSecs = Timer_GetSecs("Communication", RC)
 TotalTime = TotalTime + InputSecs
+Call Timer_Print("Communication", RC)
 print *, 'Total time spent in communication: ', TotalTime
 
    
@@ -1508,48 +1532,68 @@ print *, 'Total time spent in communication: ', TotalTime
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
    IF(RECV_LEN(i+1) > 0) THEN
-      Call MPI_Isend(C_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+      if(i==this_PET) Then
+         REARRANGED_C_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = C_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
+         SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+      else
+         Call MPI_Isend(C_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+         SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+      endif
    ENDIF
 end do
 do i=0,Input_Opt%numCPUs-1
-   IF(SendColumnDistribution(1,i+1) /= -1) THEN
+   IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
    Call MPI_Recv(REARRANGED_C_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 ENDIF
 end do
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
 IF(RECV_LEN(i+1) > 0) THEN
-   Call MPI_Isend(RCONST_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-   SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+   if(i==this_PET) Then
+      REARRANGED_RCONST_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = RCONST_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
+      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+   else
+      Call MPI_Isend(RCONST_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+   endif
 ENDIF
 end do
 do i=0,Input_Opt%numCPUs-1
-   IF(SendColumnDistribution(1,i+1) /= -1) THEN
+   IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
 Call MPI_Recv(REARRANGED_RCONST_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 ENDIF
 end do
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
 IF(RECV_LEN(i+1) > 0) THEN
-   Call MPI_Isend(ISTATUS_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
-   SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+   if(i==this_PET) Then
+      REARRANGED_ICNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = ICNTRL_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
+      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+   else
+      Call MPI_Isend(ICNTRL_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+   endif
 ENDIF
 end do
 do i=0,Input_Opt%numCPUs-1
-   IF(SendColumnDistribution(1,i+1) /= -1) THEN
+   IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
    Call MPI_Recv(REARRANGED_ISTATUS_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 ENDIF
 end do
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
 IF(RECV_LEN(i+1) > 0) THEN
-   Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-   SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+   if(i==this_PET) Then
+      REARRANGED_RCNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = RCNTRL_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
+      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+   else
+      Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+   endif
 ENDIF
 end do
 do i=0,Input_Opt%numCPUs-1
-   IF(SendColumnDistribution(1,i+1) /= -1) THEN
+   IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
    Call MPI_Recv(REARRANGED_RSTATE_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
 ENDIF
 end do
