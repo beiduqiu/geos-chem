@@ -109,7 +109,7 @@ MODULE FullChem_Mod
    character(len=1) :: delimiter
    character(len=200) :: assignmentPath,read_count_str
    INTEGER :: unit_number, read_count, SlotNumber
-   REAL :: TotalTime, InputSecs
+   REAL :: TotalTime,TotalTime2, InputSecs
 
 CONTAINS
 !EOC
@@ -1133,7 +1133,7 @@ CONTAINS
       RANDOM_CHUNK(Input_Opt%numCPUs+1) = NCELL_local
       !read the file
       !if (read_count == 0 ) then
-      !Call Timer_Add("Communication", RC)
+      !
       CALL Timer_Start( TimerName = "Communication",                       &
                               InLoop    = .TRUE.,                              &
                               ThreadNum = Thread,                              &
@@ -1144,7 +1144,7 @@ CONTAINS
       read_count = read_count + 1
       write(read_count_str, '(I0)') read_count / 6
       !print *, "read count stirng: ", read_count_str
-      assignmentPath = '/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/dynamic_100/interval_' // trim(read_count_str) // '.csv'
+      assignmentPath = '/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/limited_dynamic_1_[1.0,1.001]/interval_' // trim(read_count_str) // '.csv'
       !print *, "Assignment path: ", assignmentPath
       assignments = -1
       !open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/original.csv', status='old', action='read', iostat=ios)
@@ -1224,11 +1224,11 @@ CONTAINS
             REARRANGED_RCNTRL_1D(i,I_CELL) = RCNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
          end do
       end do
-      ! do i=1,Input_Opt%numCPUs
-      !    if(SendColumnDistribution(1,i) /= -1) then
-      !       print *, "Current PET", this_PET, "i:", i, "Communication: ", SendColumnDistribution(1,i),"----", SendColumnDistribution(2,i)
-      !    end if
-      ! end do
+      do i=1,Input_Opt%numCPUs
+         if(SendColumnDistribution(1,i) /= -1) then
+            print *, "Current PET", this_PET, "i:", i, "Communication: ", SendColumnDistribution(1,i),"----", SendColumnDistribution(2,i)
+         end if
+      end do
 
       do i=0,Input_Opt%numCPUs-1
          Call MPI_Isend(SendColumnDistribution(2,i+1), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
@@ -1322,12 +1322,12 @@ CONTAINS
    InLoop    = .TRUE.,                              &
    ThreadNum = Thread,                              &
    RC        = RC                                  )
-   CALL Timer_Sum_Loop( "Communication",            RC )
-print *, 'Communication timer added'
+
 InputSecs = Timer_GetSecs("Communication", RC)
 TotalTime = TotalTime + InputSecs
+CALL Timer_Sum_Loop( "Communication",            RC )
 Call Timer_Print("Communication", RC)
-print *, 'Total time spent in communication: ', TotalTime
+print *, "This PET", this_PET, 'Total time spent in load balance communication: ', TotalTime
 
    
 #endif
@@ -1529,6 +1529,10 @@ print *, 'Total time spent in communication: ', TotalTime
 
       ! Reverse the load balancing
 #ifdef MODEL_GCHPCTM
+CALL Timer_Start( TimerName = "Communication2",                       &
+                              InLoop    = .TRUE.,                              &
+                              ThreadNum = Thread,                              &
+                              RC        = RC                                  )
 SEND_CUR = 1
 do i=0,Input_Opt%numCPUs-1
    IF(RECV_LEN(i+1) > 0) THEN
@@ -1609,6 +1613,17 @@ do i = 1, NCELL_local
          RCNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCNTRL_1D(j,i)
       end do
 end do
+CALL Timer_End( TimerName = "Communication2",                       &
+   InLoop    = .TRUE.,                              &
+   ThreadNum = Thread,                              &
+   RC        = RC                                  )
+
+InputSecs = Timer_GetSecs("Communication2", RC)
+TotalTime2 = TotalTime2 + InputSecs
+CALL Timer_Sum_Loop( "Communication2",            RC )
+Call Timer_Print("Communication2", RC)
+print *, "This PET", this_PET, 'Total time spent in reverse load balance communication: ', TotalTime2
+print *, "This PET", this_PET, 'Total time spent in communication: ', TotalTime2+TotalTime
 
 #endif
       
@@ -2984,6 +2999,7 @@ end subroutine parse_line
       USE State_Chm_Mod,            ONLY : Ind_
       USE State_Diag_Mod,           ONLY : DgnState
       USE State_Grid_Mod,           ONLY : GrdState
+      USE Timers_Mod
 !
 ! !INPUT PARAMETERS:
 !
@@ -3220,7 +3236,8 @@ end subroutine parse_line
       ! TODO: add MPI logic to figure this out
       NCELL_max = (State_Grid%NX * State_Grid%NY * State_Grid%NZ)
       ! NCELL_max:   Max number of cells to be computed on any domain
-      
+      Call Timer_Add("Communication", RC)
+      Call Timer_Add("Communication2", RC)
       Allocate(cost_1D   (NCELL_max)       , STAT=RC)
       CALL GC_CheckVar( 'fullchem_mod.F90:cost_1D', 0, RC )
       IF ( RC /= GC_SUCCESS ) Then
