@@ -1144,7 +1144,7 @@ CONTAINS
       read_count = read_count + 1
       write(read_count_str, '(I0)') read_count / 6
       !print *, "read count stirng: ", read_count_str
-      assignmentPath = '/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/limited_dynamic_1_[1.0,1.001]/interval_' // trim(read_count_str) // '.csv'
+      assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_' // trim(read_count_str) // '.csv'
       !print *, "Assignment path: ", assignmentPath
       assignments = -1
       !open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/original.csv', status='old', action='read', iostat=ios)
@@ -1171,7 +1171,8 @@ CONTAINS
    do i=1, NCELL_local
       if(assignments(Input_Opt%thisCPU+1, i) /= -1) then      
       COLUMN_assignment(i)%first = i
-      COLUMN_assignment(i)%second = assignments(Input_Opt%thisCPU+1, i)
+      !COLUMN_assignment(i)%second = assignments(Input_Opt%thisCPU+1, i)
+      COLUMN_assignment(i)%second = this_PET
       end if
    end do
    !  do i=1, NCELL_local
@@ -1191,6 +1192,10 @@ CONTAINS
 
       SendColumnDistribution = -1
       j=-1
+      CALL ( TimerName = "CopyTimer",                       &
+                              InLoop    = .TRUE.,                              &
+                              ThreadNum = Thread,                              &
+                              RC        = RC                                  )
       do  I_CELL = 1, NCELL_local
          if(COLUMN_assignment(I_CELL)%second == (j-1)) Then
                if(SendColumnDistribution(1,j) /= -1) THEN
@@ -1211,7 +1216,6 @@ CONTAINS
                print *, "ERROR in generate sendcolumndistribution2"
             end if
          end if
-
          do i =1, NSPEC
             !print*, 'Debug value of i: ',i, 'Column assignemnt id: ', COLUMN_assignment(j)%first
             REARRANGED_C_1D(i,I_CELL) = C_1D(i,COLUMN_assignment(I_CELL)%first)
@@ -1224,6 +1228,13 @@ CONTAINS
             REARRANGED_RCNTRL_1D(i,I_CELL) = RCNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
          end do
       end do
+         CALL Timer_End( TimerName = "CopyTimer",                       &
+   InLoop    = .TRUE.,                              &
+   ThreadNum = Thread,                              &
+   RC        = RC                                  )
+CALL Timer_Sum_Loop( "CopyTimer",            RC )
+Call Timer_Print("CopyTimer", RC)
+print *, "This PET", this_PET, 'Total time spent in copy: ', TotalTime
       do i=1,Input_Opt%numCPUs
          if(SendColumnDistribution(1,i) /= -1) then
             print *, "Current PET", this_PET, "i:", i, "Communication: ", SendColumnDistribution(1,i),"----", SendColumnDistribution(2,i)
@@ -1244,6 +1255,7 @@ CONTAINS
       do i=0,Input_Opt%numCPUs-1
       !print *,'Updated version of the code'
          IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET) THEN
+            print *, "Current PET", this_PET, "Send data to PET", i
             Call MPI_Isend(REARRANGED_C_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
          ENDIF
       end do
@@ -1252,6 +1264,7 @@ CONTAINS
    do i=0,Input_Opt%numCPUs-1
       IF(RECV_LEN(i+1) > 0) THEN
          if(i==this_PET) Then
+            print *, "Current PET", this_PET, "Get data from itself"
             C_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_C_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
             RECV_CUR = RECV_CUR+RECV_LEN(i+1)
          else
@@ -1329,7 +1342,10 @@ CALL Timer_Sum_Loop( "Communication",            RC )
 Call Timer_Print("Communication", RC)
 print *, "This PET", this_PET, 'Total time spent in load balance communication: ', TotalTime
 
-   
+         CALL Timer_Start( TimerName = "Computation",                       &
+                              InLoop    = .TRUE.,                              &
+                              ThreadNum = Thread,                              &
+                              RC        = RC                                  )
 #endif
 
       !$OMP PARALLEL DO                                                        &
@@ -1526,10 +1542,17 @@ print *, "This PET", this_PET, 'Total time spent in load balance communication: 
          C_balanced(:,I_CELL) = C(:)
          RCONST_balanced(:,I_CELL) = RCONST(:)
       ENDDO
-
+ CALL Timer_End( TimerName = "Computation",                       &
+   InLoop    = .TRUE.,                              &
+   ThreadNum = Thread,                              &
+   RC        = RC                                  )
+CALL Timer_Sum_Loop( "Computation",            RC )
+print *, "This PET", this_PET, 'Total time spent in computation: ', TotalTime
+Call Timer_Print("Computation", RC)
+print *, "This PET", this_PET, 'Total time spent in  computation: ', TotalTime
       ! Reverse the load balancing
 #ifdef MODEL_GCHPCTM
-CALL Timer_Start( TimerName = "Communication2",                       &
+CALL Timer_Start( TimerName = "ReverseCommunicationTimer",                       &
                               InLoop    = .TRUE.,                              &
                               ThreadNum = Thread,                              &
                               RC        = RC                                  )
@@ -1613,15 +1636,15 @@ do i = 1, NCELL_local
          RCNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCNTRL_1D(j,i)
       end do
 end do
-CALL Timer_End( TimerName = "Communication2",                       &
+CALL Timer_End( TimerName = "ReverseCommunicationTimer",                       &
    InLoop    = .TRUE.,                              &
    ThreadNum = Thread,                              &
    RC        = RC                                  )
 
-InputSecs = Timer_GetSecs("Communication2", RC)
+InputSecs = Timer_GetSecs("ReverseCommunicationTimer", RC)
 TotalTime2 = TotalTime2 + InputSecs
-CALL Timer_Sum_Loop( "Communication2",            RC )
-Call Timer_Print("Communication2", RC)
+CALL Timer_Sum_Loop( "ReverseCommunicationTimer",            RC )
+Call Timer_Print("ReverseCommunicationTimer", RC)
 print *, "This PET", this_PET, 'Total time spent in reverse load balance communication: ', TotalTime2
 print *, "This PET", this_PET, 'Total time spent in communication: ', TotalTime2+TotalTime
 
@@ -3237,7 +3260,9 @@ end subroutine parse_line
       NCELL_max = (State_Grid%NX * State_Grid%NY * State_Grid%NZ)
       ! NCELL_max:   Max number of cells to be computed on any domain
       Call Timer_Add("Communication", RC)
-      Call Timer_Add("Communication2", RC)
+      Call Timer_Add("Computation", RC)
+      Call Timer_Add("CopyTimer", RC)
+      Call Timer_Add("ReverseCommunicationTimer", RC)
       Allocate(cost_1D   (NCELL_max)       , STAT=RC)
       CALL GC_CheckVar( 'fullchem_mod.F90:cost_1D', 0, RC )
       IF ( RC /= GC_SUCCESS ) Then
