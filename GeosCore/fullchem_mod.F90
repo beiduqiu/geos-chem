@@ -1144,9 +1144,10 @@ CONTAINS
       read_count = read_count + 1
       write(read_count_str, '(I0)') read_count / 6
       !print *, "read count stirng: ", read_count_str
-      assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_' // trim(read_count_str) // '.csv'
+      !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_' // trim(read_count_str) // '.csv'
       !print *, "Assignment path: ", assignmentPath
       assignments = -1
+      assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/original.csv'
       !open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/original.csv', status='old', action='read', iostat=ios)
       open(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=ios)
       if (ios /= 0) then
@@ -1164,182 +1165,186 @@ CONTAINS
       end do
 
       close(unit_number)
-      do i=1, NCELL_local
-         COLUMN_assignment(i)%first = -1
-         COLUMN_assignment(i)%second = Input_Opt%numCPUs+10
-      end do
-   do i=1, NCELL_local
-      if(assignments(Input_Opt%thisCPU+1, i) /= -1) then      
-      COLUMN_assignment(i)%first = i
-      !COLUMN_assignment(i)%second = assignments(Input_Opt%thisCPU+1, i)
-      COLUMN_assignment(i)%second = this_PET
-      end if
-   end do
-   !  do i=1, NCELL_local
-   !     COLUMN_assignment(i)%first = i
-   !     COLUMN_assignment(i)%second = mod(i,Input_Opt%numCPUs)
-   !  end do
-   do i=1, NCELL_local
-      do j = 1, NCELL_local
-         if (COLUMN_assignment(j)%second > COLUMN_assignment(j+1)%second) then
-            ! Swap the elements
-            Pair_temp = COLUMN_assignment(j)
-            COLUMN_assignment(j) = COLUMN_assignment(j+1)
-            COLUMN_assignment(j+1) = Pair_temp
-         end if
-      end do
-   end do
+!       do i=1, NCELL_local
+!          COLUMN_assignment(i)%first = -1
+!          COLUMN_assignment(i)%second = Input_Opt%numCPUs+10
+!       end do
+!    do i=1, NCELL_local
+!       if(assignments(Input_Opt%thisCPU+1, i) /= -1) then      
+!       COLUMN_assignment(i)%first = i
+!       !COLUMN_assignment(i)%second = assignments(Input_Opt%thisCPU+1, i)
+!       COLUMN_assignment(i)%second = this_PET
+!       end if
+!    end do
+!    !  do i=1, NCELL_local
+!    !     COLUMN_assignment(i)%first = i
+!    !     COLUMN_assignment(i)%second = mod(i,Input_Opt%numCPUs)
+!    !  end do
+!    do i=1, NCELL_local
+!       do j = 1, NCELL_local
+!          if (COLUMN_assignment(j)%second > COLUMN_assignment(j+1)%second) then
+!             ! Swap the elements
+!             Pair_temp = COLUMN_assignment(j)
+!             COLUMN_assignment(j) = COLUMN_assignment(j+1)
+!             COLUMN_assignment(j+1) = Pair_temp
+!          end if
+!       end do
+!    end do
 
-      SendColumnDistribution = -1
-      j=-1
-      CALL ( TimerName = "CopyTimer",                       &
-                              InLoop    = .TRUE.,                              &
-                              ThreadNum = Thread,                              &
-                              RC        = RC                                  )
-      do  I_CELL = 1, NCELL_local
-         if(COLUMN_assignment(I_CELL)%second == (j-1)) Then
-               if(SendColumnDistribution(1,j) /= -1) THEN
-               SendColumnDistribution(2,j) = SendColumnDistribution(2,j) + 1
-            else
-               print *, "ERROR in generate sendcolumndistribution"
-            end if
-         else if (COLUMN_assignment(I_CELL)%second /= (j-1)) Then
-            j = COLUMN_assignment(I_CELL)%second + 1
-            !print *,"Current pet", this_PET,"Column assignment11: ",COLUMN_assignment(I_CELL)%second
-            if(SendColumnDistribution(1,j) == -1) THEN
-              !print *, "Current PET", this_PET,  "Communication: ", SendColumnDistribution(1,j),"----", SendColumnDistribution(2,j)
-               SendColumnDistribution(1,j) = I_CELL
-               SendColumnDistribution(2,j) = 1
-            ! else if(SendColumnDistribution(1,j) /= -1) THEN
-            !    SendColumnDistribution(2,j) = SendColumnDistribution(2,j) + 1
-            else
-               print *, "ERROR in generate sendcolumndistribution2"
-            end if
-         end if
-         do i =1, NSPEC
-            !print*, 'Debug value of i: ',i, 'Column assignemnt id: ', COLUMN_assignment(j)%first
-            REARRANGED_C_1D(i,I_CELL) = C_1D(i,COLUMN_assignment(I_CELL)%first)
-         end do
-         do i=1, NREACT
-            REARRANGED_RCONST_1D(i,I_CELL) = RCONST_1D(i,COLUMN_assignment(I_CELL)%first)
-         end do
-         do i=1, 20
-            REARRANGED_ICNTRL_1D(i,I_CELL) = ICNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
-            REARRANGED_RCNTRL_1D(i,I_CELL) = RCNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
-         end do
-      end do
-         CALL Timer_End( TimerName = "CopyTimer",                       &
-   InLoop    = .TRUE.,                              &
-   ThreadNum = Thread,                              &
-   RC        = RC                                  )
-CALL Timer_Sum_Loop( "CopyTimer",            RC )
-Call Timer_Print("CopyTimer", RC)
-print *, "This PET", this_PET, 'Total time spent in copy: ', TotalTime
-      do i=1,Input_Opt%numCPUs
-         if(SendColumnDistribution(1,i) /= -1) then
-            print *, "Current PET", this_PET, "i:", i, "Communication: ", SendColumnDistribution(1,i),"----", SendColumnDistribution(2,i)
-         end if
-      end do
+!       SendColumnDistribution = -1
+!       j=-1
+!       CALL Timer_Start( TimerName = "CopyTimer",                       &
+!                               InLoop    = .TRUE.,                              &
+!                               ThreadNum = Thread,                              &
+!                               RC        = RC                                  )
+!       do  I_CELL = 1, NCELL_local
+!          if(COLUMN_assignment(I_CELL)%second == (j-1)) Then
+!                if(SendColumnDistribution(1,j) /= -1) THEN
+!                SendColumnDistribution(2,j) = SendColumnDistribution(2,j) + 1
+!             else
+!                print *, "ERROR in generate sendcolumndistribution"
+!             end if
+!          else if (COLUMN_assignment(I_CELL)%second /= (j-1)) Then
+!             j = COLUMN_assignment(I_CELL)%second + 1
+!             !print *,"Current pet", this_PET,"Column assignment11: ",COLUMN_assignment(I_CELL)%second
+!             if(SendColumnDistribution(1,j) == -1) THEN
+!               !print *, "Current PET", this_PET,  "Communication: ", SendColumnDistribution(1,j),"----", SendColumnDistribution(2,j)
+!                SendColumnDistribution(1,j) = I_CELL
+!                SendColumnDistribution(2,j) = 1
+!             ! else if(SendColumnDistribution(1,j) /= -1) THEN
+!             !    SendColumnDistribution(2,j) = SendColumnDistribution(2,j) + 1
+!             else
+!                print *, "ERROR in generate sendcolumndistribution2"
+!             end if
+!          end if
+!          do i =1, NSPEC
+!             !print*, 'Debug value of i: ',i, 'Column assignemnt id: ', COLUMN_assignment(j)%first
+!             REARRANGED_C_1D(i,I_CELL) = C_1D(i,COLUMN_assignment(I_CELL)%first)
+!          end do
+!          do i=1, NREACT
+!             REARRANGED_RCONST_1D(i,I_CELL) = RCONST_1D(i,COLUMN_assignment(I_CELL)%first)
+!          end do
+!          do i=1, 20
+!             REARRANGED_ICNTRL_1D(i,I_CELL) = ICNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
+!             REARRANGED_RCNTRL_1D(i,I_CELL) = RCNTRL_1D(i,COLUMN_assignment(I_CELL)%first)
+!          end do
+!       end do
+!          CALL Timer_End( TimerName = "CopyTimer",                       &
+!    InLoop    = .TRUE.,                              &
+!    ThreadNum = Thread,                              &
+!    RC        = RC                                  )
+! CALL Timer_Sum_Loop( "CopyTimer",            RC )
+! Call Timer_Print("CopyTimer", RC)
+! print *, "This PET", this_PET, 'Total time spent in copy: ', TotalTime
+!       do i=1,Input_Opt%numCPUs
+!          if(SendColumnDistribution(1,i) /= -1) then
+!             print *, "Current PET", this_PET, "i:", i, "Communication: ", SendColumnDistribution(1,i),"----", SendColumnDistribution(2,i)
+!          end if
+!       end do
 
-      do i=0,Input_Opt%numCPUs-1
-         Call MPI_Isend(SendColumnDistribution(2,i+1), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
-      end do
+!       do i=0,Input_Opt%numCPUs-1
+!          Call MPI_Isend(SendColumnDistribution(2,i+1), 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+!       end do
       
-      ! Recv segment lengths
-      do i=0,Input_Opt%numCPUs-1
-         Call MPI_Recv(RECV_LEN(i+1),1,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-      end do
+!       ! Recv segment lengths
+!       do i=0,Input_Opt%numCPUs-1
+!          Call MPI_Recv(RECV_LEN(i+1),1,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+!       end do
 
 
-      ! Pass the actual data
-      do i=0,Input_Opt%numCPUs-1
-      !print *,'Updated version of the code'
-         IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET) THEN
-            print *, "Current PET", this_PET, "Send data to PET", i
-            Call MPI_Isend(REARRANGED_C_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-         ENDIF
-      end do
-   ! Recv segments
-   RECV_CUR = 1
-   do i=0,Input_Opt%numCPUs-1
-      IF(RECV_LEN(i+1) > 0) THEN
-         if(i==this_PET) Then
-            print *, "Current PET", this_PET, "Get data from itself"
-            C_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_C_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
-            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-         else
-            Call MPI_Recv(C_balanced(1,RECV_CUR), RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-            if (RECV_CUR > NCELL_MAX) then
-               print *,'NCELL_MAX: ', NCELL_MAX
-               print *, 'Exceeding maximum number of cell', RECV_CUR
-            endif
-         endif
+!       ! Pass the actual data
+!       do i=0,Input_Opt%numCPUs-1
+!       !print *,'Updated version of the code'
+!          IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET) THEN
+!             print *, "Current PET", this_PET, "Send data to PET", i
+!             Call MPI_Isend(REARRANGED_C_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+!          ENDIF
+!       end do
+!    ! Recv segments
+!    RECV_CUR = 1
+!    do i=0,Input_Opt%numCPUs-1
+!       IF(RECV_LEN(i+1) > 0) THEN
+!          if(i==this_PET) Then
+!             print *, "Current PET", this_PET, "Get data from itself"
+!             C_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_C_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
+!             RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+!          else
+!             Call MPI_Recv(C_balanced(1,RECV_CUR), RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+!             RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+!             if (RECV_CUR > NCELL_MAX) then
+!                print *,'NCELL_MAX: ', NCELL_MAX
+!                print *, 'Exceeding maximum number of cell', RECV_CUR
+!             endif
+!          endif
          
-      ENDIF
-   end do
+!       ENDIF
+!    end do
 
 
-   do i=0,Input_Opt%numCPUs-1
-      IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
-         Call MPI_Isend(REARRANGED_RCONST_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-      ENDIF
-   end do
-   RECV_CUR = 1
-   do i=0,Input_Opt%numCPUs-1
-      IF(RECV_LEN(i+1) > 0) THEN
-         if(i==this_PET) Then
-            RCONST_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_RCONST_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
-            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-         else
-            Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-         endif
-      ENDIF
-   end do
-   do i=0,Input_Opt%numCPUs-1
-      IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
-         Call MPI_Isend(REARRANGED_ICNTRL_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
-      ENDIF
-   end do
-   RECV_CUR = 1
-   do i=0,Input_Opt%numCPUs-1
-      IF(RECV_LEN(i+1) > 0) THEN
-         if(i==this_PET) Then
-            ICNTRL_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_ICNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
-            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-         else
-            Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-         endif
-      ENDIF
-   end do
-   do i=0,Input_Opt%numCPUs-1
-      IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
-         Call MPI_Isend(REARRANGED_RCNTRL_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-      ENDIF
-   end do
-   RECV_CUR = 1
-   do i=0,Input_Opt%numCPUs-1
-   IF(RECV_LEN(i+1) > 0) THEN
-      if(i==this_PET) Then
-         RCNTRL_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_RCNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
-         RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-      else
-         Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-         RECV_CUR = RECV_CUR+RECV_LEN(i+1)
-      endif
-   ENDIF
-   end do
-   CALL Timer_End( TimerName = "Communication",                       &
-   InLoop    = .TRUE.,                              &
-   ThreadNum = Thread,                              &
-   RC        = RC                                  )
+!    do i=0,Input_Opt%numCPUs-1
+!       IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
+!          Call MPI_Isend(REARRANGED_RCONST_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+!       ENDIF
+!    end do
+!    RECV_CUR = 1
+!    do i=0,Input_Opt%numCPUs-1
+!       IF(RECV_LEN(i+1) > 0) THEN
+!          if(i==this_PET) Then
+!             RCONST_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_RCONST_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
+!             RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+!          else
+!             Call MPI_Recv(RCONST_balanced(1,RECV_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+!             RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+!          endif
+!       ENDIF
+!    end do
+!    do i=0,Input_Opt%numCPUs-1
+!       IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
+!          Call MPI_Isend(REARRANGED_ICNTRL_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+!       ENDIF
+!    end do
+!    RECV_CUR = 1
+!    do i=0,Input_Opt%numCPUs-1
+!       IF(RECV_LEN(i+1) > 0) THEN
+!          if(i==this_PET) Then
+!             ICNTRL_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_ICNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
+!             RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+!          else
+!             Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+!             RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+!          endif
+!       ENDIF
+!    end do
+!    do i=0,Input_Opt%numCPUs-1
+!       IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
+!          Call MPI_Isend(REARRANGED_RCNTRL_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+!       ENDIF
+!    end do
+!    RECV_CUR = 1
+!    do i=0,Input_Opt%numCPUs-1
+!    IF(RECV_LEN(i+1) > 0) THEN
+!       if(i==this_PET) Then
+!          RCNTRL_balanced(:,RECV_CUR:RECV_CUR+RECV_LEN(i+1)-1) = REARRANGED_RCNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1)
+!          RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+!       else
+!          Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+!          RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+!       endif
+!    ENDIF
+!    end do
+!    CALL Timer_End( TimerName = "Communication",                       &
+!    InLoop    = .TRUE.,                              &
+!    ThreadNum = Thread,                              &
+!    RC        = RC                                  )
 
-InputSecs = Timer_GetSecs("Communication", RC)
-TotalTime = TotalTime + InputSecs
-CALL Timer_Sum_Loop( "Communication",            RC )
-Call Timer_Print("Communication", RC)
+! InputSecs = Timer_GetSecs("Communication", RC)
+! TotalTime = TotalTime + InputSecs
+! CALL Timer_Sum_Loop( "Communication",            RC )
+! Call Timer_Print("Communication", RC)
+RCONST_balanced = RCONST_1D
+C_balanced = C_1D
+ICNTRL_balanced = ICNTRL_1D
+RCNTRL_balanced = RCNTRL_1D
 print *, "This PET", this_PET, 'Total time spent in load balance communication: ', TotalTime
 
          CALL Timer_Start( TimerName = "Computation",                       &
@@ -1363,7 +1368,7 @@ print *, "This PET", this_PET, 'Total time spent in load balance communication: 
       !$OMP COLLAPSE( 3                                                       )&
       !$OMP SCHEDULE( DYNAMIC, 24                                             )&
       !$OMP REDUCTION( +:errorCount                                           )
-      DO I_CELL = 1, RECV_CUR
+      DO I_CELL = 1, NCELL_local
 
          ! Skip to the end of the loop if we have failed integration twice
          IF ( Failed2x ) CYCLE
@@ -1556,98 +1561,101 @@ CALL Timer_Start( TimerName = "ReverseCommunicationTimer",                      
                               InLoop    = .TRUE.,                              &
                               ThreadNum = Thread,                              &
                               RC        = RC                                  )
-SEND_CUR = 1
-do i=0,Input_Opt%numCPUs-1
-   IF(RECV_LEN(i+1) > 0) THEN
-      if(i==this_PET) Then
-         REARRANGED_C_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = C_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
-         SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-      else
-         Call MPI_Isend(C_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-         SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-      endif
-   ENDIF
-end do
-do i=0,Input_Opt%numCPUs-1
-   IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
-   Call MPI_Recv(REARRANGED_C_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-ENDIF
-end do
-SEND_CUR = 1
-do i=0,Input_Opt%numCPUs-1
-IF(RECV_LEN(i+1) > 0) THEN
-   if(i==this_PET) Then
-      REARRANGED_RCONST_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = RCONST_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
-      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-   else
-      Call MPI_Isend(RCONST_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-   endif
-ENDIF
-end do
-do i=0,Input_Opt%numCPUs-1
-   IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
-Call MPI_Recv(REARRANGED_RCONST_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-ENDIF
-end do
-SEND_CUR = 1
-do i=0,Input_Opt%numCPUs-1
-IF(RECV_LEN(i+1) > 0) THEN
-   if(i==this_PET) Then
-      REARRANGED_ICNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = ICNTRL_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
-      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-   else
-      Call MPI_Isend(ICNTRL_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
-      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-   endif
-ENDIF
-end do
-do i=0,Input_Opt%numCPUs-1
-   IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
-   Call MPI_Recv(REARRANGED_ISTATUS_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-ENDIF
-end do
-SEND_CUR = 1
-do i=0,Input_Opt%numCPUs-1
-IF(RECV_LEN(i+1) > 0) THEN
-   if(i==this_PET) Then
-      REARRANGED_RCNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = RCNTRL_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
-      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-   else
-      Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
-      SEND_CUR = SEND_CUR + RECV_LEN(i+1)
-   endif
-ENDIF
-end do
-do i=0,Input_Opt%numCPUs-1
-   IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
-   Call MPI_Recv(REARRANGED_RSTATE_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-ENDIF
-end do
-do i = 1, NCELL_local
-      do j = 1, NSPEC
-         C_1D(j,COLUMN_assignment(i)%first) = REARRANGED_C_1D(j,i)
-      end do
-      do j = 1, NREACT
-         RCONST_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCONST_1D(j,i)
-      end do
-      do j=1, 20
-         ICNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_ICNTRL_1D(j,i)
-         RCNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCNTRL_1D(j,i)
-      end do
-end do
-CALL Timer_End( TimerName = "ReverseCommunicationTimer",                       &
-   InLoop    = .TRUE.,                              &
-   ThreadNum = Thread,                              &
-   RC        = RC                                  )
+! SEND_CUR = 1
+! do i=0,Input_Opt%numCPUs-1
+!    IF(RECV_LEN(i+1) > 0) THEN
+!       if(i==this_PET) Then
+!          REARRANGED_C_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = C_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
+!          SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+!       else
+!          Call MPI_Isend(C_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+!          SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+!       endif
+!    ENDIF
+! end do
+! do i=0,Input_Opt%numCPUs-1
+!    IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
+!    Call MPI_Recv(REARRANGED_C_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+! ENDIF
+! end do
+! SEND_CUR = 1
+! do i=0,Input_Opt%numCPUs-1
+! IF(RECV_LEN(i+1) > 0) THEN
+!    if(i==this_PET) Then
+!       REARRANGED_RCONST_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = RCONST_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
+!       SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+!    else
+!       Call MPI_Isend(RCONST_balanced(1,SEND_CUR),(RECV_LEN(i+1))*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+!       SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+!    endif
+! ENDIF
+! end do
+! do i=0,Input_Opt%numCPUs-1
+!    IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
+! Call MPI_Recv(REARRANGED_RCONST_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+! ENDIF
+! end do
+! SEND_CUR = 1
+! do i=0,Input_Opt%numCPUs-1
+! IF(RECV_LEN(i+1) > 0) THEN
+!    if(i==this_PET) Then
+!       REARRANGED_ICNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = ICNTRL_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
+!       SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+!    else
+!       Call MPI_Isend(ICNTRL_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+!       SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+!    endif
+! ENDIF
+! end do
+! do i=0,Input_Opt%numCPUs-1
+!    IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
+!    Call MPI_Recv(REARRANGED_ISTATUS_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+! ENDIF
+! end do
+! SEND_CUR = 1
+! do i=0,Input_Opt%numCPUs-1
+! IF(RECV_LEN(i+1) > 0) THEN
+!    if(i==this_PET) Then
+!       REARRANGED_RCNTRL_1D(:,SendColumnDistribution(1,i+1):SendColumnDistribution(1,i+1)+SendColumnDistribution(2,i+1)-1) = RCNTRL_balanced(:,SEND_CUR:SEND_CUR+RECV_LEN(i+1)-1)
+!       SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+!    else
+!       Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),(RECV_LEN(i+1))*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+!       SEND_CUR = SEND_CUR + RECV_LEN(i+1)
+!    endif
+! ENDIF
+! end do
+! do i=0,Input_Opt%numCPUs-1
+!    IF(SendColumnDistribution(1,i+1) /= -1 .and. i/=this_PET)THEN
+!    Call MPI_Recv(REARRANGED_RSTATE_1D(1,SendColumnDistribution(1,i+1)),SendColumnDistribution(2,i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+! ENDIF
+! end do
+! do i = 1, NCELL_local
+!       do j = 1, NSPEC
+!          C_1D(j,COLUMN_assignment(i)%first) = REARRANGED_C_1D(j,i)
+!       end do
+!       do j = 1, NREACT
+!          RCONST_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCONST_1D(j,i)
+!       end do
+!       do j=1, 20
+!          ICNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_ICNTRL_1D(j,i)
+!          RCNTRL_1D(j,COLUMN_assignment(i)%first) = REARRANGED_RCNTRL_1D(j,i)
+!       end do
+! end do
+! CALL Timer_End( TimerName = "ReverseCommunicationTimer",                       &
+!    InLoop    = .TRUE.,                              &
+!    ThreadNum = Thread,                              &
+!    RC        = RC                                  )
 
-InputSecs = Timer_GetSecs("ReverseCommunicationTimer", RC)
-TotalTime2 = TotalTime2 + InputSecs
-CALL Timer_Sum_Loop( "ReverseCommunicationTimer",            RC )
-Call Timer_Print("ReverseCommunicationTimer", RC)
-print *, "This PET", this_PET, 'Total time spent in reverse load balance communication: ', TotalTime2
-print *, "This PET", this_PET, 'Total time spent in communication: ', TotalTime2+TotalTime
-
+! InputSecs = Timer_GetSecs("ReverseCommunicationTimer", RC)
+! TotalTime2 = TotalTime2 + InputSecs
+! CALL Timer_Sum_Loop( "ReverseCommunicationTimer",            RC )
+! Call Timer_Print("ReverseCommunicationTimer", RC)
+! print *, "This PET", this_PET, 'Total time spent in reverse load balance communication: ', TotalTime2
+! print *, "This PET", this_PET, 'Total time spent in communication: ', TotalTime2+TotalTime
+ RCONST_1D = RCONST_balanced
+C_1D = C_balanced
+ICNTRL_1D = ICNTRL_balanced
+RCNTRL_balanced = RCNTRL_1D
 #endif
       
       DO L = 1, State_Grid%NZ
