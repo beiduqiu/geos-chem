@@ -88,7 +88,19 @@ MODULE FullChem_Mod
   REAL(fP), ALLOCATABLE  :: RCNTRL_balanced(:,:)
   INTEGER,  ALLOCATABLE  :: ISTATUS_balanced(:,:)
   REAL(fP), ALLOCATABLE  :: RSTATE_balanced(:,:)
-
+  REAL(fp), ALLOCATABLE  :: REARRANGED_C_1D(:,:)
+  REAL(fP), ALLOCATABLE  :: REARRANGED_RCONST_1D(:,:)
+  INTEGER,  ALLOCATABLE  :: REARRANGED_ICNTRL_1D(:,:)
+  REAL(fP), ALLOCATABLE  :: REARRANGED_RCNTRL_1D(:,:)
+  REAL(fP), ALLOCATABLE  :: REARRANGED_RSTATE_1D(:,:)
+  INTEGER,  ALLOCATABLE  :: REARRANGED_ISTATUS_1D(:,:)
+  INTEGER,  ALLOCATABLE  :: SendColumnDistribution(:,:)
+  INTEGER,  ALLOCATABLE  :: RECV_LEN(:)
+  INTEGER,  ALLOCATABLE  :: assignments(:,:)
+  character(len=200000) :: line
+  character(len=1) :: delimiter
+  character(len=200) :: assignmentPath,read_count_str
+  INTEGER :: unit_number, read_count, SlotNumber,ios,sendPointer,sendLength,sendTo, recvFrom, RECV_CUR,count,SEND_CUR
 CONTAINS
 !EOC
 !------------------------------------------------------------------------------
@@ -1078,7 +1090,7 @@ CONTAINS
     ENDDO ! I
     ENDDO ! J
     ENDDO ! L
-
+    
     ! Balancing
     ! NCELL_local: Number of cells in local domain which need a calculation
     ! NCELL:       Number of cells we are running a calculation for after balancing
@@ -1105,20 +1117,219 @@ CONTAINS
     else
         prev_PET = this_PET - 1
     endif
-    ! How many cells are to be processed?
-    Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    ! Pass the actual data
-    Call MPI_Isend(C_1D(1,1),NCELL_local*NSPEC,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(C_balanced(1,1),NCELL_balanced*NSPEC,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RCONST_1D(1,1),NCELL_local*NREACT,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RCONST_balanced(1,1),NCELL_balanced*NREACT,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(ICNTRL_1D(1,1),NCELL_local*20,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(ICNTRL_balanced(1,1),NCELL_balanced*20,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RCNTRL_1D(1,1),NCELL_local*20,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RCNTRL_balanced(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-#endif
+    CALL Timer_Start( TimerName = "Communication",                       &
+                                  InLoop    = .TRUE.,                              &
+                                  ThreadNum = Thread,                              &
+                                  RC        = RC                                  )
+   delimiter = ','
+   unit_number = 10
+   read_count = read_count + 1
+   write(read_count_str, '(I0)') read_count / 6
+   !print *, "read count stirng: ", read_count_str
+   assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_' // trim(read_count_str) // '.csv'
+   !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_108.csv'
+   !print *, "Assignment path: ", assignmentPath
+   assignments = -1
+   !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/original.csv'
+   !open(unit=unit_number, file='/storage1/fs1/rvmartin/Active/GEOS-Chem-shared/ExtData/original.csv', status='old', action='read', iostat=ios)
+   open(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=ios)
+   if (ios /= 0) then
+         print *, 'Error opening the file.'
+         stop
+   end if
 
+   do i = 1, Input_Opt%numCPUs
+         read(unit_number, '(A)', iostat=ios) line
+         if (ios /= 0) exit
+         if(i==Input_Opt%thisCPU+1) Then
+         call parse_line(line, assignments(i, :), delimiter)
+         !print *, "Current PET", this_PET, "Assignments: ", assignments(i, :)
+         end if
+   end do
+   close(unit_number)
+   REARRANGED_C_1D = -1
+   REARRANGED_ICNTRL_1D = -1
+   REARRANGED_ISTATUS_1D = -1
+   REARRANGED_RCNTRL_1D = -1
+   REARRANGED_RCONST_1D = -1
+   REARRANGED_RSTATE_1D = -1   
+   NCELL_balanced = NCELL_local
+   sendPointer = 1
+   sendTo = -1
+   recvFrom = -1
+   do i=1, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1,i) /= -1 .AND. assignments(Input_Opt%thisCPU+1,i) /= Input_Opt%thisCPU )  Then
+         sendTo = assignments(Input_Opt%thisCPU+1,i)
+         REARRANGED_C_1D(:,sendPointer) = C_1D(:,i)
+         REARRANGED_RCONST_1D(:,sendPointer) = RCONST_1D(:,i)
+         REARRANGED_ICNTRL_1D(:,sendPointer) = ICNTRL_1D(:,i)
+         REARRANGED_RCNTRL_1D(:,sendPointer) = RCNTRL_1D(:,i)
+         sendPointer = sendPointer + 1
+      end if
+   end do
+   sendLength = sendPointer - 1
+   do i=0, Input_Opt%numCPUs - 1
+      if(i == sendTo) then
+         Call MPI_Isend(sendLength, 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+      else
+         Call MPI_Isend(0, 1,MPI_INTEGER,i,0,Input_Opt%mpiComm,request,RC)
+      end if
+   end do
+      
+   ! Recv segment lengths
+   do i=0,Input_Opt%numCPUs-1
+      Call MPI_Recv(RECV_LEN(i+1),1,MPI_INTEGER,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+      !print *, "Current pet: ", this_PET,"receive len ", i,":",RECV_LEN(i+1)
+   end do
+   !print *, "NSPEC value: ", NSPEC
+   do i=0,Input_Opt%numCPUs-1
+      IF( i==sendTo) THEN
+         !print *, "Current PET", this_PET, "Send data to PET", i,"send length: ", sendLength
+         Call MPI_Isend(REARRANGED_C_1D(1,1),sendLength*NSPEC,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,request,RC)
+      ENDIF
+   end do
+   RECV_CUR = 1
+   do i=0,Input_Opt%numCPUs-1
+      IF(RECV_LEN(i+1) > 0) THEN
+         if(i/=this_PET) Then
+            !print *, "receive from ", i, "length", RECV_LEN(i+1)
+            Call MPI_Recv(C_balanced(1,RECV_CUR), RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+            RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+            if (RECV_CUR > NCELL_MAX) then
+               print *,'NCELL_MAX: ', NCELL_MAX
+               print *, 'Exceeding maximum number of cell', RECV_CUR
+            endif
+         endif
+      ENDIF
+   end do
+
+   do i=0,Input_Opt%numCPUs-1
+      !print *,'Updated version of the code'
+         IF( i==sendTo) THEN
+            !print *, "Current PET", this_PET, "Send data to PET", i
+            Call MPI_Isend(REARRANGED_RCONST_1D(1,1),sendLength*NREACT,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,request,RC)
+         ENDIF
+      end do
+      RECV_CUR = 1
+      do i=0,Input_Opt%numCPUs-1
+         IF(RECV_LEN(i+1) > 0) THEN
+            if(i/=this_PET) Then
+               Call MPI_Recv(RCONST_balanced(1,RECV_CUR), RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+               RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+               if (RECV_CUR > NCELL_MAX) then
+                  print *,'NCELL_MAX: ', NCELL_MAX
+                  print *, 'Exceeding maximum number of cell', RECV_CUR
+               endif
+            endif
+         ENDIF
+      end do
+
+   do i=0,Input_Opt%numCPUs-1
+      !print *,'Updated version of the code'
+         IF( i==sendTo) THEN
+            !print *, "Current PET", this_PET, "Send data to PET", i
+            Call MPI_Isend(REARRANGED_ICNTRL_1D(1,1),sendLength*20,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,request,RC)
+         ENDIF
+      end do
+      RECV_CUR = 1
+      do i=0,Input_Opt%numCPUs-1
+         IF(RECV_LEN(i+1) > 0) THEN
+            if(i/=this_PET) Then
+               Call MPI_Recv(ICNTRL_balanced(1,RECV_CUR), RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+               RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+               if (RECV_CUR > NCELL_MAX) then
+                  print *,'NCELL_MAX: ', NCELL_MAX
+                  print *, 'Exceeding maximum number of cell', RECV_CUR
+               endif
+            endif
+         ENDIF
+      end do
+
+   do i=0,Input_Opt%numCPUs-1
+      !print *,'Updated version of the code'
+         IF( i==sendTo) THEN
+            !print *, "Current PET", this_PET, "Send data to PET", i
+            Call MPI_Isend(REARRANGED_RCNTRL_1D(1,1),sendLength*20,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,request,RC)
+         ENDIF
+      end do
+      RECV_CUR = 1
+      do i=0,Input_Opt%numCPUs-1
+         IF(RECV_LEN(i+1) > 0) THEN
+            if(i/=this_PET) Then
+               recvFrom = i
+               Call MPI_Recv(RCNTRL_balanced(1,RECV_CUR), RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+               RECV_CUR = RECV_CUR+RECV_LEN(i+1)
+               if (RECV_CUR > NCELL_MAX) then
+                  print *,'NCELL_MAX: ', NCELL_MAX
+                  print *, 'Exceeding maximum number of cell', RECV_CUR
+               endif
+            endif
+         ENDIF
+      end do
+   !If only receive from other processor
+   IF(sendTo == -1) Then
+      CALL Timer_Start( TimerName = "CopyTimer1",                       &
+      InLoop    = .TRUE.,                              &
+      ThreadNum = Thread,                              &
+      RC        = RC                                  )
+      C_balanced(:,RECV_CUR:RECV_CUR+NCELL_local) = C_1D
+      RCONST_balanced(:,RECV_CUR:RECV_CUR+NCELL_local) = RCONST_1D 
+      ICNTRL_balanced(:,RECV_CUR:RECV_CUR+NCELL_local) = ICNTRL_1D
+      RCNTRL_balanced(:,RECV_CUR:RECV_CUR+NCELL_local) = RCNTRL_1D
+      NCELL_balanced = RECV_CUR+1+NCELL_local
+      CALL Timer_End( TimerName = "CopyTimer1",                       &
+      InLoop    = .TRUE.,                              &
+      ThreadNum = Thread,                              &
+      RC        = RC                                  )
+   ELSE
+      CALL Timer_Start( TimerName = "CopyTimer1",                       &
+      InLoop    = .TRUE.,                              &
+      ThreadNum = Thread,                              &
+      RC        = RC                                  )
+      count = 1
+      do i = 0, NCELL_local
+         if(assignments(Input_Opt%thisCPU+1,i)== Input_Opt%thisCPU) then
+            C_balanced(:,count) = C_1D(:,i)
+            count = count + 1
+         endif
+      end do
+      count = 1
+      do i = 0, NCELL_local
+         if(assignments(Input_Opt%thisCPU+1,i)== Input_Opt%thisCPU) then
+            RCONST_balanced(:,count) = RCONST_1D(:,i)
+            count = count + 1
+         endif
+      end do
+      count = 1
+      do i = 0, NCELL_local
+         if(assignments(Input_Opt%thisCPU+1,i)== Input_Opt%thisCPU) then
+            ICNTRL_balanced(:,count) = ICNTRL_1D(:,i)
+            count = count + 1
+         endif
+      end do
+      count = 1
+      do i = 0, NCELL_local
+         if(assignments(Input_Opt%thisCPU+1,i)== Input_Opt%thisCPU) then
+            RCNTRL_balanced(:,count) = RCNTRL_1D(:,i)
+            count = count + 1
+         endif
+      end do
+      NCELL_balanced = count - 1
+      CALL Timer_End( TimerName = "CopyTimer1",                       &
+      InLoop    = .TRUE.,                              &
+      ThreadNum = Thread,                              &
+      RC        = RC                                  )
+   ENDIF
+#endif
+CALL Timer_End( TimerName = "Communication",                       &
+InLoop    = .TRUE.,                              &
+ThreadNum = Thread,                              &
+RC        = RC                                  )
+CALL Timer_Sum_Loop( "Communication",            RC )
+CALL Timer_Start( TimerName = "Computation",                       &
+                                  InLoop    = .TRUE.,                              &
+                                  ThreadNum = Thread,                              &
+                                  RC        = RC                                  )
     !$OMP PARALLEL DO                                                        &
     !$OMP DEFAULT( SHARED                                                   )&
     !$OMP PRIVATE( I,        J,        L,       N                           )&
@@ -1314,18 +1525,154 @@ CONTAINS
        RCONST_balanced(:,I_CELL) = RCONST(:)
     ENDDO
 
+
+    CALL Timer_End( TimerName = "Computation",                       &
+    InLoop    = .TRUE.,                              &
+    ThreadNum = Thread,                              &
+    RC        = RC                                  )
+ CALL Timer_Sum_Loop( "Computation",            RC )
     ! Reverse the load balancing
 #ifdef MODEL_GCHPCTM
-    ! Pass the actual arrays
-    Call MPI_Isend(C_balanced(1,1),NCELL_balanced*NSPEC,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(C_1D(1,1),NCELL_local*NSPEC,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    ! The rest are needed for diagnostics only
-    Call MPI_Isend(ISTATUS_balanced(1,1),NCELL_balanced*20,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(ISTATUS_1D(1,1),NCELL_local*20,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RSTATE_balanced(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RSTATE_1D(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-    Call MPI_Isend(RCONST_balanced(1,1),NCELL_balanced*NREACT,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,request,RC)
-    Call MPI_Recv(RCONST_1D(1,1),NCELL_local*NREACT,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+CALL Timer_Start( TimerName = "ReverseCommunicationTimer",                       &
+InLoop    = .TRUE.,                              &
+ThreadNum = Thread,                              &
+RC        = RC                                  )
+IF(sendTo == -1) Then
+   CALL Timer_Start( TimerName = "CopyTimer2",                       &
+InLoop    = .TRUE.,                              &
+ThreadNum = Thread,                              &
+RC        = RC                                  )
+   C_1D(:,1:NCELL_local) = C_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
+   ISTATUS_1D(:,1:NCELL_local) = ISTATUS_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
+   RSTATE_1D(:,1:NCELL_local) = RSTATE_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
+   RCONST_1D(:,1:NCELL_local) = RCONST_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
+   CALL Timer_End( TimerName = "CopyTimer2",                       &
+InLoop    = .TRUE.,                              &
+ThreadNum = Thread,                              &
+RC        = RC                                  )
+   SEND_CUR = 1
+   do i=0,Input_Opt%numCPUs-1
+      IF(RECV_LEN(i+1) > 0) THEN
+         if(i/=this_PET) Then
+            Call MPI_Isend(C_balanced(1,SEND_CUR),RECV_LEN(i+1)*NSPEC,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+            SEND_CUR = SEND_CUR+RECV_LEN(i+1)
+         endif
+      ENDIF
+   end do
+   do i=0,Input_Opt%numCPUs-1
+      IF(RECV_LEN(i+1) > 0) THEN
+         if(i/=this_PET) Then
+            Call MPI_Isend(RCONST_balanced(1,SEND_CUR),RECV_LEN(i+1)*NREACT,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+            SEND_CUR = SEND_CUR+RECV_LEN(i+1)
+         endif
+      ENDIF
+   end do
+   do i=0,Input_Opt%numCPUs-1
+      IF(RECV_LEN(i+1) > 0) THEN
+         if(i/=this_PET) Then
+            Call MPI_Isend(RSTATE_balanced(1,SEND_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+            SEND_CUR = SEND_CUR+RECV_LEN(i+1)
+         endif
+      ENDIF
+   end do
+   do i=0,Input_Opt%numCPUs-1
+      IF(RECV_LEN(i+1) > 0) THEN
+         if(i/=this_PET) Then
+            Call MPI_Isend(ISTATUS_balanced(1,SEND_CUR),RECV_LEN(i+1)*20,MPI_DOUBLE_PRECISION,i,0,Input_Opt%mpiComm,request,RC)
+            SEND_CUR = SEND_CUR+RECV_LEN(i+1)
+         endif
+      ENDIF
+   end do
+ELSE
+   count = 1
+   do i = 0, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1,i)== Input_Opt%thisCPU) then
+          C_1D(:,i) = C_balanced(:,count)
+         count = count + 1
+      endif
+   end do
+   count = 1
+   do i = 0, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1,i)== Input_Opt%thisCPU) then
+          RCONST_1D(:,i) = RCONST_balanced(:,count)
+         count = count + 1
+      endif
+   end do
+   count = 1
+   do i = 0, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1,i)== Input_Opt%thisCPU) then
+         ICNTRL_1D(:,i) = ICNTRL_balanced(:,count)
+         count = count + 1
+      endif
+   end do
+   count = 1
+   do i = 0, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1,i)== Input_Opt%thisCPU) then
+         RCNTRL_1D(:,i) = RCNTRL_balanced(:,count)
+         count = count + 1
+      endif
+   end do
+   Call MPI_Recv(REARRANGED_C_1D(1,1),sendLength*NSPEC,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(REARRANGED_RCONST_1D(1,1),sendLength*NREACT,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(REARRANGED_RSTATE_1D(1,1),sendLength*20,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   Call MPI_Recv(REARRANGED_ISTATUS_1D(1,1),sendLength*20,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   CALL Timer_Start( TimerName = "CopyTimer2",                       &
+         InLoop    = .TRUE.,                              &
+         ThreadNum = Thread,                              &
+         RC        = RC                                  )
+   count = 1
+   do i = 0, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1,i) /= -1 .AND. assignments(Input_Opt%thisCPU+1,i)/= Input_Opt%thisCPU) then
+          C_1D(:,i) = REARRANGED_C_1D(:,count)
+         count = count + 1
+      endif
+   end do
+   count = 1
+   do i = 0, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1,i) /= -1 .AND. assignments(Input_Opt%thisCPU+1,i)/= Input_Opt%thisCPU) then
+          RCONST_1D(:,i) = REARRANGED_RCONST_1D(:,count)
+         count = count + 1
+      endif
+   end do
+   count = 1
+   do i = 0, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1,i) /= -1 .AND. assignments(Input_Opt%thisCPU+1,i)/= Input_Opt%thisCPU) then
+          ISTATUS_1D(:,i) = REARRANGED_ISTATUS_1D(:,count)
+         count = count + 1
+      endif
+   end do
+   count = 1
+   do i = 0, NCELL_local
+      if(assignments(Input_Opt%thisCPU+1,i) /= -1 .AND. assignments(Input_Opt%thisCPU+1,i)/= Input_Opt%thisCPU) then
+         RSTATE_1D(:,i) = REARRANGED_RSTATE_1D(:,count)
+         count = count + 1
+      endif
+   end do
+   CALL Timer_End( TimerName = "CopyTimer2",                       &
+               InLoop    = .TRUE.,                              &
+               ThreadNum = Thread,                              &
+               RC        = RC                                  )
+
+ENDIF
+CALL Timer_End( TimerName = "ReverseCommunicationTimer",                       &
+InLoop    = .TRUE.,                              &
+ThreadNum = Thread,                              &
+RC        = RC                                  )
+CALL Timer_Sum_Loop( "ReverseCommunicationTimer",            RC )
+CALL Timer_Sum_Loop( "CopyTimer1",            RC )
+CALL Timer_Sum_Loop( "CopyTimer2",            RC )
+! order is Timerflag, Timertypr,PET_number, interval,sendTo, recvFrom, sendLength, RECV_Length, CommunicationTime 
+WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","Communication,", this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
+Call Timer_Print("Communication", RC)
+WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","Computation,",this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
+CALL Timer_Print("Computation", RC)
+WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","ReverseCommunicationTimer,", this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
+Call Timer_Print("ReverseCommunicationTimer", RC)
+WRITE(*, '(A,A,I0, A,I0,A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","CopyTimer1,", this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
+Call Timer_Print("CopyTimer1", RC)
+WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","CopyTimer2,",this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
+Call Timer_Print("CopyTimer2", RC)
+
 #endif
     
     DO L = 1, State_Grid%NZ
@@ -2674,6 +3021,7 @@ CONTAINS
     USE State_Chm_Mod,            ONLY : Ind_
     USE State_Diag_Mod,           ONLY : DgnState
     USE State_Grid_Mod,           ONLY : GrdState
+    USE Timers_Mod
 !
 ! !INPUT PARAMETERS:
 !
@@ -2910,7 +3258,12 @@ CONTAINS
     ! TODO: add MPI logic to figure this out
     NCELL_max = (State_Grid%NX * State_Grid%NY * State_Grid%NZ)
     ! NCELL_max:   Max number of cells to be computed on any domain
-    
+    print *, 'Enter initilization on Pet ', Input_Opt%thisCPU
+    Call Timer_Add("Communication", RC)
+    Call Timer_Add("Computation", RC)
+    Call Timer_Add("CopyTimer1", RC)
+    Call Timer_Add("CopyTimer2", RC)
+    Call Timer_Add("ReverseCommunicationTimer", RC)
     Allocate(cost_1D   (NCELL_max)       , STAT=RC)
     CALL GC_CheckVar( 'fullchem_mod.F90:cost_1D', 0, RC )
     IF ( RC /= GC_SUCCESS ) Then
@@ -2995,7 +3348,60 @@ CONTAINS
         CALL GC_Error( 'Failed to allocate RSTATE_balanced', RC, ThisLoc )
         RETURN
     End If
-
+    Allocate(assignments(Input_Opt%numCPUs,NCELL_MAX), STAT=RC)
+       Call GC_CheckVar( 'fullchem_mod.F90:assignments', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+             CALL GC_Error( 'Failed to allocate assignments', RC, ThisLoc )
+             RETURN
+       End If
+       Allocate(REARRANGED_C_1D (NSPEC,NCELL_max) , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_C_1D', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+          CALL GC_Error( 'Failed to allocate REARRANGED_C_1D', RC, ThisLoc )
+          RETURN
+       End If
+       Allocate(REARRANGED_RCONST_1D (NREACT,NCELL_max), STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCONST_1D', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+          CALL GC_Error( 'Failed to allocate REARRANGED_RCONST_1D', RC, ThisLoc )
+          RETURN
+       End If
+       Allocate(REARRANGED_ISTATUS_1D(20,NCELL_max)    , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ISTATUS_1D', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+             CALL GC_Error( 'Failed to allocate REARRANGED_ISTATUS_1D', RC, ThisLoc )
+             RETURN
+       End If
+    Allocate(REARRANGED_RSTATE_1D (20,NCELL_max)    , STAT=RC)
+    CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RSTATE_1D', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+          CALL GC_Error( 'Failed to allocate REARRANGED_RSTATE_1D', RC, ThisLoc )
+          RETURN
+       End If
+       Allocate(REARRANGED_ICNTRL_1D (20,NCELL_max)    , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ICNTRL_1D', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+          CALL GC_Error( 'Failed to allocate REARRANGED_ICNTRL_1D', RC, ThisLoc )
+          RETURN
+       End If
+       Allocate(REARRANGED_RCNTRL_1D (20,NCELL_max)    , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCNTRL_1D', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+          CALL GC_Error( 'Failed to allocate REARRANGED_RCNTRL_1D', RC, ThisLoc )
+          RETURN
+       End If
+       Allocate(SendColumnDistribution(2,Input_Opt%numCPUs),STAT=RC)
+       Call GC_CheckVar( 'fullchem_mod.F90:SendColumnDistribution', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+             CALL GC_Error( 'Failed to allocate SendColumnDistribution', RC, ThisLoc )
+             RETURN
+       End If    
+       Allocate(RECV_LEN(Input_Opt%numCPUs), STAT=RC)
+       Call GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+             CALL GC_Error( 'Failed to allocate RECV_LEN', RC, ThisLoc )
+             RETURN
+       End If
   END SUBROUTINE Init_FullChem
 !EOC
 !------------------------------------------------------------------------------
@@ -3148,7 +3554,74 @@ CONTAINS
        CALL GC_CheckVar( 'fullchem_mod.F90:RSTATE_balanced', 2, RC )
        IF ( RC /= GC_SUCCESS ) RETURN
     ENDIF
+    IF(ALLOCATED(REARRANGED_RSTATE_1D)) THEN
+      DEALLOCATE(REARRANGED_RSTATE_1D, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RSTATE_1D', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+      ENDIF
+   IF(ALLOCATED(REARRANGED_ISTATUS_1D)) THEN
+      DEALLOCATE(REARRANGED_ISTATUS_1D, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ISTATUS_1D', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
+      ENDIF
 
+   IF(ALLOCATED(REARRANGED_C_1D)) THEN
+   DEALLOCATE(REARRANGED_C_1D, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_C_1D', 2, RC )
+   IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
+   IF(ALLOCATED(REARRANGED_RCONST_1D)) THEN
+   DEALLOCATE(REARRANGED_RCONST_1D, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCONST_1D', 2, RC )
+   IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
+
+   IF(ALLOCATED(REARRANGED_ICNTRL_1D)) THEN
+   DEALLOCATE(REARRANGED_ICNTRL_1D, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ICNTRL_1D', 2, RC )
+   IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
+   IF(ALLOCATED(REARRANGED_RCNTRL_1D)) THEN
+   DEALLOCATE(REARRANGED_RCNTRL_1D, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCNTRL_1D', 2, RC )
+   IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
+   IF(ALLOCATED(SendColumnDistribution)) THEN
+   DEALLOCATE(SendColumnDistribution, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:SendColumnDistribution', 2, RC )
+   IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
+   IF(ALLOCATED(RECV_LEN)) THEN
+   DEALLOCATE(RECV_LEN, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 2, RC )
+   IF ( RC /= GC_SUCCESS ) RETURN
+   ENDIF
   END SUBROUTINE Cleanup_FullChem
+
+  subroutine parse_line(line, row, delimiter)
+   character(len=*), intent(in) :: line
+   INTEGER, intent(out) :: row(:)
+   character(len=1), intent(in) :: delimiter
+   integer :: i, j, start, len, iunit
+   character(len=3*NCELL_MAX) :: temp
+
+   i = 1
+   j = 1
+   start = 1
+
+   do while (i <= len_trim(line))
+         if (line(i:i) == delimiter .or. i == len_trim(line)) then
+            if (i == len_trim(line)) then
+               temp = line(start:i)
+            else
+               temp = line(start:i-1)
+            end if
+            read(temp, *) row(j)
+            j = j + 1
+            start = i + 1
+         end if
+         i = i + 1
+   end do
+end subroutine parse_line
 !EOC
 END MODULE FullChem_Mod
