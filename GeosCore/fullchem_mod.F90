@@ -553,6 +553,7 @@ CONTAINS
 #endif
     !$OMP COLLAPSE( 3                                                       )&
     !$OMP SCHEDULE( DYNAMIC, 24                                             )&
+    !$OMP REDUCTION( +:errorCount                                           )
     DO L = 1, State_Grid%NZ
     DO J = 1, State_Grid%NY
     DO I = 1, State_Grid%NX
@@ -1117,17 +1118,14 @@ CONTAINS
     else
         prev_PET = this_PET - 1
     endif
-    CALL Timer_Start( TimerName = "Communication",                       &
-                                  InLoop    = .TRUE.,                              &
-                                  ThreadNum = Thread,                              &
-                                  RC        = RC                                  )
+
    delimiter = ','
    unit_number = 10
    read_count = read_count + 1
    write(read_count_str, '(I0)') read_count / 6
    !print *, "read count stirng: ", read_count_str
-   assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_' // trim(read_count_str) // '.csv'
-   !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_108.csv'
+   !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_' // trim(read_count_str) // '.csv'
+   assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_108.csv'
    !print *, "Assignment path: ", assignmentPath
    assignments = -1
    !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/original.csv'
@@ -1167,6 +1165,7 @@ CONTAINS
          sendPointer = sendPointer + 1
       end if
    end do
+
    sendLength = sendPointer - 1
    do i=0, Input_Opt%numCPUs - 1
       if(i == sendTo) then
@@ -1188,6 +1187,10 @@ CONTAINS
          Call MPI_Isend(REARRANGED_C_1D(1,1),sendLength*NSPEC,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,request,RC)
       ENDIF
    end do
+   CALL Timer_Start( TimerName = "Communication",                       &
+   InLoop    = .TRUE.,                              &
+   ThreadNum = Thread,                              &
+   RC        = RC                                  )
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
       IF(RECV_LEN(i+1) > 0) THEN
@@ -1266,6 +1269,10 @@ CONTAINS
             endif
          ENDIF
       end do
+      CALL Timer_End( TimerName = "Communication",                       &
+            InLoop    = .TRUE.,                              &
+            ThreadNum = Thread,                              &
+            RC        = RC                                  )
    !If only receive from other processor
    IF(sendTo == -1) Then
       CALL Timer_Start( TimerName = "CopyTimer1",                       &
@@ -1321,10 +1328,7 @@ CONTAINS
       RC        = RC                                  )
    ENDIF
 #endif
-CALL Timer_End( TimerName = "Communication",                       &
-InLoop    = .TRUE.,                              &
-ThreadNum = Thread,                              &
-RC        = RC                                  )
+
 CALL Timer_Sum_Loop( "Communication",            RC )
 CALL Timer_Start( TimerName = "Computation",                       &
                                   InLoop    = .TRUE.,                              &
@@ -1533,23 +1537,24 @@ CALL Timer_Start( TimerName = "Computation",                       &
  CALL Timer_Sum_Loop( "Computation",            RC )
     ! Reverse the load balancing
 #ifdef MODEL_GCHPCTM
-CALL Timer_Start( TimerName = "ReverseCommunicationTimer",                       &
-InLoop    = .TRUE.,                              &
-ThreadNum = Thread,                              &
-RC        = RC                                  )
+
 IF(sendTo == -1) Then
-   CALL Timer_Start( TimerName = "CopyTimer2",                       &
-InLoop    = .TRUE.,                              &
-ThreadNum = Thread,                              &
-RC        = RC                                  )
-   C_1D(:,1:NCELL_local) = C_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
-   ISTATUS_1D(:,1:NCELL_local) = ISTATUS_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
-   RSTATE_1D(:,1:NCELL_local) = RSTATE_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
-   RCONST_1D(:,1:NCELL_local) = RCONST_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
-   CALL Timer_End( TimerName = "CopyTimer2",                       &
-InLoop    = .TRUE.,                              &
-ThreadNum = Thread,                              &
-RC        = RC                                  )
+      CALL Timer_Start( TimerName = "CopyTimer2",                       &
+         InLoop    = .TRUE.,                              &
+         ThreadNum = Thread,                              &
+         RC        = RC                                  )
+      C_1D(:,1:NCELL_local) = C_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
+      ISTATUS_1D(:,1:NCELL_local) = ISTATUS_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
+      RSTATE_1D(:,1:NCELL_local) = RSTATE_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
+      RCONST_1D(:,1:NCELL_local) = RCONST_balanced(:,RECV_CUR:RECV_CUR+NCELL_local)
+      CALL Timer_End( TimerName = "CopyTimer2",                       &
+            InLoop    = .TRUE.,                              &
+            ThreadNum = Thread,                              &
+            RC        = RC                                  )
+   CALL Timer_Start( TimerName = "ReverseCommunicationTimer",                       &
+      InLoop    = .TRUE.,                              &
+      ThreadNum = Thread,                              &
+      RC        = RC                                  )
    SEND_CUR = 1
    do i=0,Input_Opt%numCPUs-1
       IF(RECV_LEN(i+1) > 0) THEN
@@ -1583,6 +1588,10 @@ RC        = RC                                  )
          endif
       ENDIF
    end do
+   CALL Timer_End( TimerName = "ReverseCommunicationTimer",                       &
+      InLoop    = .TRUE.,                              &
+      ThreadNum = Thread,                              &
+      RC        = RC                                  )
 ELSE
    count = 1
    do i = 0, NCELL_local
@@ -1612,10 +1621,18 @@ ELSE
          count = count + 1
       endif
    end do
+   CALL Timer_Start( TimerName = "ReverseCommunicationTimer",                       &
+   InLoop    = .TRUE.,                              &
+   ThreadNum = Thread,                              &
+   RC        = RC                                  )
    Call MPI_Recv(REARRANGED_C_1D(1,1),sendLength*NSPEC,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    Call MPI_Recv(REARRANGED_RCONST_1D(1,1),sendLength*NREACT,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    Call MPI_Recv(REARRANGED_RSTATE_1D(1,1),sendLength*20,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    Call MPI_Recv(REARRANGED_ISTATUS_1D(1,1),sendLength*20,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+   CALL Timer_End( TimerName = "ReverseCommunicationTimer",                       &
+      InLoop    = .TRUE.,                              &
+      ThreadNum = Thread,                              &
+      RC        = RC                                  )
    CALL Timer_Start( TimerName = "CopyTimer2",                       &
          InLoop    = .TRUE.,                              &
          ThreadNum = Thread,                              &
@@ -1654,10 +1671,7 @@ ELSE
                RC        = RC                                  )
 
 ENDIF
-CALL Timer_End( TimerName = "ReverseCommunicationTimer",                       &
-InLoop    = .TRUE.,                              &
-ThreadNum = Thread,                              &
-RC        = RC                                  )
+
 CALL Timer_Sum_Loop( "ReverseCommunicationTimer",            RC )
 CALL Timer_Sum_Loop( "CopyTimer1",            RC )
 CALL Timer_Sum_Loop( "CopyTimer2",            RC )
