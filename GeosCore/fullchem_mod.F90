@@ -542,7 +542,7 @@ CONTAINS
     !$OMP PRIVATE( NOxTau,     NOxConc, NOx_weight, NOx_tau_weighted        )&
 #endif
     !$OMP COLLAPSE( 3                                                       )&
-    !$OMP SCHEDULE( DYNAMIC, 24                                             )&
+    !$OMP SCHEDULE( DYNAMIC, 24                                             )
     DO L = 1, State_Grid%NZ
     DO J = 1, State_Grid%NY
     DO I = 1, State_Grid%NX
