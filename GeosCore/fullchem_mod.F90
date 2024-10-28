@@ -1129,7 +1129,7 @@ CONTAINS
    !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_' // trim(read_count_str) // '.csv'
    !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_108.csv'
    assignments = -1
-   !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/mannual.csv'
+   assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/mannual.csv'
    print *, "Finish reading assignment"
    open(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=ios)
    if (ios /= 0) then
