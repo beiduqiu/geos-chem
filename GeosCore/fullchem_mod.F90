@@ -1195,7 +1195,14 @@ CONTAINS
    InLoop    = .TRUE.,                              &
    ThreadNum = Thread,                              &
    RC        = RC                                  )
-
+   if(this_PET ==0) then
+      do i=1, NSPEC
+         print*, "C_rearranged for PET 0", REARRANGED_C_1D(i,1)
+      end do
+      do i=1, NSPEC
+         print*, "C_1D for PET 0", C_1D(i,1)
+      end do
+   end if
    Call MPI_Isend(REARRANGED_C_1D(1,1),sendLength*NSPEC,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,request,RC)
    RECV_CUR = 1
    do i=0,Input_Opt%numCPUs-1
@@ -1209,6 +1216,11 @@ CONTAINS
             endif
       ENDIF
    end do
+   if(this_PET ==1) then
+      do i=1, NSPEC
+         print*, "C_balanced for PET 1", C_balanced(i,1)
+      end do
+   end if
       Call MPI_Isend(REARRANGED_RCONST_1D(1,1),sendLength*NREACT,MPI_DOUBLE_PRECISION,sendTo,0,Input_Opt%mpiComm,request,RC)
 
       RECV_CUR = 1
