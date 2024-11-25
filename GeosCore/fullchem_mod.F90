@@ -100,7 +100,6 @@ MODULE FullChem_Mod
   REAL(fP), ALLOCATABLE  :: Balanced_REARRANGED_RCNTRL_1D(:,:)
   REAL(fP), ALLOCATABLE  :: Balanced_REARRANGED_RSTATE_1D(:,:)
   INTEGER,  ALLOCATABLE  :: Balanced_REARRANGED_ISTATUS_1D(:,:)
-  INTEGER,  ALLOCATABLE  :: RECV_LEN(:)
   INTEGER,  ALLOCATABLE  :: assignments(:,:)
  
   character(len=2000) :: line
@@ -238,7 +237,7 @@ CONTAINS
     ! All the KPP inputs remapped to a 1-D array
     INTEGER                :: NCELL, NCELL_local, I_CELL,I_CELL2, NCELL_balanced
     INTEGER                :: this_PET, prev_PET, next_PET, request
-    INTEGER :: unit_number, read_count, SlotNumber,ios,sendPointer,sendLength,sendTo, recvFrom, RECV_CUR,count,SEND_CUR,Flag
+    INTEGER                :: unit_number, read_count, SlotNumber,ios,sendPointer,sendLength,sendTo, recvFrom, RECV_CUR,count,SEND_CUR,Flag
     ! For tagged CO saving
     REAL(fp)               :: LCH4, PCO_TOT, PCO_CH4, PCO_NMVOC
 
@@ -1141,7 +1140,6 @@ CONTAINS
    !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_108.csv'
    assignments = -1
    !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/swap.csv'
-   print *, "Finish reading assignment"
    open(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=ios)
    if (ios /= 0) then
          print *, 'Error opening the file.'
@@ -1156,26 +1154,13 @@ CONTAINS
          end if
    end do
    close(unit_number)
-   !Finish reading assignment
-
    REARRANGED_C_1D = 0
    REARRANGED_ICNTRL_1D = 0
    REARRANGED_ISTATUS_1D = 0
    REARRANGED_RCNTRL_1D = 0
    REARRANGED_RCONST_1D = 0
    REARRANGED_RSTATE_1D = 0
-   ! print*,"Updated version34"
-   ! DO i = 1, 23
-   !    if(i==this_PET + 1) then
-   !    WRITE(*, '(144I5)') assignments(i, :)
-   !    endif
-   ! END DO
-   ! Balanced_REARRANGED_C_1D = 0
-   ! Balanced_REARRANGED_ICNTRL_1D = 0
-   ! Balanced_REARRANGED_ISTATUS_1D = 0
-   ! Balanced_REARRANGED_RCNTRL_1D = 0
-   ! Balanced_REARRANGED_RCONST_1D = 0
-   ! Balanced_REARRANGED_RSTATE_1D = 0   
+
    sendPointer = 1
    sendTo = 0
    recvFrom = 0
@@ -1185,181 +1170,10 @@ CONTAINS
       ENDIF
    ENDDO
    recvFrom = sendTo
-
-
-   ! do I_CELL=1, NCELL_local
-   !    flag = mod(I_CELL, (State_Grid%NY*State_Grid%NX))
-   !    if(flag == 0) then
-   !       flag = State_Grid%NY*State_Grid%NX
-   !    end if
-
-   !    if(assignments(this_PET+1,flag) /= -1 .AND. assignments(this_PET +1,flag) /= this_PET )  Then
-   !       sendTo = assignments(Input_Opt%thisCPU+1,flag)
-   !       print*, "update to balanced rearranged this pet:", this_PET,"number of i: ",I_CELL,"mod: ",sendTo
-   !       ! REARRANGED_C_1D(:,sendPointer) = C_1D(:,i)
-   !       ! REARRANGED_RCONST_1D(:,sendPointer) = RCONST_1D(:,i)
-   !       ! REARRANGED_ICNTRL_1D(:,sendPointer) = ICNTRL_1D(:,i)
-   !       ! REARRANGED_RCNTRL_1D(:,sendPointer) = RCNTRL_1D(:,i)
-   !       sendPointer = sendPointer + 1
-   !    end if
-   ! end do
-   
-   ! sendLength = sendPointer - 1
-   ! recvFrom = sendTo
-      !  How many cells are to be processed?
-      ! if (this_PET == 0) then
-      !     sendTo = 2
-      !     recvFrom = 8
-      ! else if (this_PET == 1) then
-      !     sendTo = 4
-      !     recvFrom = 6
-      ! else if (this_PET == 2) then
-      !     sendTo = 9
-      !     recvFrom = 0
-      ! else if (this_PET == 3) then
-      !     sendTo = 23
-      !     recvFrom = 22
-      ! else if (this_PET == 4) then
-      !     sendTo = 14
-      !     recvFrom = 1
-      ! else if (this_PET == 5) then
-      !     sendTo = 8
-      !     recvFrom = 14
-      ! else if (this_PET == 6) then
-      !     sendTo = 1
-      !     recvFrom = 17
-      ! else if (this_PET == 7) then
-      !     sendTo = 20
-      !     recvFrom = 15
-      ! else if (this_PET == 8) then
-      !     sendTo = 0
-      !     recvFrom = 5
-      ! else if (this_PET == 9) then
-      !     sendTo = 13
-      !     recvFrom = 2
-      ! else if (this_PET == 10) then
-      !     sendTo = 16
-      !     recvFrom = 18
-      ! else if (this_PET == 11) then
-      !     sendTo = 15
-      !     recvFrom = 20
-      ! else if (this_PET == 12) then
-      !     sendTo = 18
-      !     recvFrom = 16
-      ! else if (this_PET == 13) then
-      !     sendTo = 19
-      !     recvFrom = 9
-      ! else if (this_PET == 14) then
-      !     sendTo = 5
-      !     recvFrom = 4
-      ! else if (this_PET == 15) then
-      !     sendTo = 7
-      !     recvFrom = 11
-      ! else if (this_PET == 16) then
-      !     sendTo = 12
-      !     recvFrom = 10
-      ! else if (this_PET == 17) then
-      !     sendTo = 6
-      !     recvFrom = 23
-      ! else if (this_PET == 18) then
-      !     sendTo = 10
-      !     recvFrom = 12
-      ! else if (this_PET == 19) then
-      !     sendTo = 21
-      !     recvFrom = 13
-      ! else if (this_PET == 20) then
-      !     sendTo = 11
-      !     recvFrom = 7
-      ! else if (this_PET == 21) then
-      !     sendTo = 22
-      !     recvFrom = 19 
-      ! else if (this_PET == 22) then
-      !     sendTo = 3
-      !     recvFrom = 21
-      ! else if (this_PET == 23) then
-      !     sendTo = 17
-      !     recvFrom = 3
-      ! end if
-
-
-
-   ! if (this_PET == 0) then
-      !     sendTo = 21
-      !     recvFrom = 21
-      ! else if (this_PET == 1) then
-      !     sendTo = 4
-      !     recvFrom = 4
-      ! else if (this_PET == 2) then
-      !     sendTo = 20
-      !     recvFrom = 20
-      ! else if (this_PET == 3) then
-      !     sendTo = 13
-      !     recvFrom = 13
-      ! else if (this_PET == 4) then
-      !     sendTo = 1
-      !     recvFrom = 1
-      ! else if (this_PET == 5) then
-      !     sendTo = 22
-      !     recvFrom = 22
-      ! else if (this_PET == 6) then
-      !     sendTo = 14
-      !     recvFrom = 14
-      ! else if (this_PET == 7) then
-      !     sendTo = 11
-      !     recvFrom = 11
-      ! else if (this_PET == 8) then
-      !     sendTo = 15
-      !     recvFrom = 15
-      ! else if (this_PET == 9) then
-      !     sendTo = 17
-      !     recvFrom = 17
-      ! else if (this_PET == 10) then
-      !     sendTo = 16
-      !     recvFrom = 16
-      ! else if (this_PET == 11) then
-      !     sendTo = 7
-      !     recvFrom = 7
-      ! else if (this_PET == 12) then
-      !     sendTo = 19
-      !     recvFrom = 19
-      ! else if (this_PET == 13) then
-      !     sendTo = 3
-      !     recvFrom = 3
-      ! else if (this_PET == 14) then
-      !     sendTo = 6
-      !     recvFrom = 6
-      ! else if (this_PET == 15) then
-      !     sendTo = 8
-      !     recvFrom = 8
-      ! else if (this_PET == 16) then
-      !     sendTo = 10
-      !     recvFrom = 10
-      ! else if (this_PET == 17) then
-      !     sendTo = 9
-      !     recvFrom = 9
-      ! else if (this_PET == 18) then
-      !     sendTo = 23
-      !     recvFrom = 23
-      ! else if (this_PET == 19) then
-      !     sendTo = 12
-      !     recvFrom = 12
-      ! else if (this_PET == 20) then
-      !     sendTo = 2
-      !     recvFrom = 2
-      ! else if (this_PET == 21) then
-      !     sendTo = 0
-      !     recvFrom = 0
-      ! else if (this_PET == 22) then
-      !     sendTo = 5
-      !     recvFrom = 5
-      ! else if (this_PET == 23) then
-      !     sendTo = 18
-      !     recvFrom = 18
-      ! end if
   next_PET = sendTo
   prev_PET = recvFrom
   NCELL_balanced = NCELL_local
-  print *, "PET:", this_PET, " SendTo:", sendTo, " RecvFrom:", recvFrom, "send length:", sendLength,"NCELL local: ", NCELL_local, "NCELL balanced: ", NCELL_balanced,"num CPUs: ", Input_Opt%numCPUs,"next_PET", next_PET,"Prev pet", prev_PET
+  !print *, "PET:", this_PET, " SendTo:", sendTo, " RecvFrom:", recvFrom, "send length:", sendLength,"NCELL local: ", NCELL_local, "NCELL balanced: ", NCELL_balanced,"num CPUs: ", Input_Opt%numCPUs,"next_PET", next_PET,"Prev pet", prev_PET
    ! Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
    ! Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    ! Pass the actual data
@@ -1377,13 +1191,7 @@ CONTAINS
       IF(assignments(this_PET+1,I_CELL)/= -1 .and. assignments(this_PET+1,I_CELL) /= this_PET) then
          do I_CELL2 = 1, State_Grid%NZ
             flag = (I_CELL2-1) * 144 + I_CELL
-            if(this_PET==0) then
-            print*,"flag before if: ", flag
-            endif
             if(flag <= NCELL_local) then
-               if(this_PET==0) then
-                  print*,"flag after if: ", flag
-                  endif
                C_balanced(:,flag) = C_1D(:,flag)
                RCONST_balanced(:,flag) = RCONST_1D(:,flag)
                ICNTRL_balanced(:,flag) = ICNTRL_1D(:,flag)
@@ -1392,14 +1200,8 @@ CONTAINS
          ENDDO
       ENDIF
    ENDDO
-!   C_balanced = C_1D
-!    RCONST_balanced = RCONST_1D
-!    ICNTRL_balanced = ICNTRL_1D
-!    RCNTRL_balanced = RCNTRL_1D
-   print*, "Finish transfering data, start computation, total cell number is : ", NCELL_balanced
 #endif
 
-!print *, "Current PET: ", this_PET, "Finish transfering data, start computation, total cell number is : ", NCELL_balanced
 CALL Timer_Sum_Loop( "Communication",            RC )
 CALL Timer_Start( TimerName = "Computation",                       &
                                   InLoop    = .TRUE.,                              &
@@ -1636,7 +1438,7 @@ Call MPI_Recv(RCONST_1D(1,1),NCELL_local*NREACT,MPI_DOUBLE_PRECISION,next_PET,0,
        ENDDO
     ENDIF
  ENDDO
-print *, "update version 118"
+!print *, "update version 118"
 CALL Timer_Sum_Loop( "Computation",            RC )
 ! order is Timerflag, Timertypr,PET_number, interval,sendTo, recvFrom, sendLength, RECV_Length, CommunicationTime 
 ! WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","Communication,", this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
@@ -3409,12 +3211,7 @@ CALL Timer_Sum_Loop( "Computation",            RC )
           CALL GC_Error( 'Failed to allocate REARRANGED_RCNTRL_1D', RC, ThisLoc )
           RETURN
        End If   
-       Allocate(RECV_LEN(Input_Opt%numCPUs), STAT=RC)
-       Call GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 0, RC )
-       IF ( RC /= GC_SUCCESS ) Then
-             CALL GC_Error( 'Failed to allocate RECV_LEN', RC, ThisLoc )
-             RETURN
-       End If
+
   END SUBROUTINE Init_FullChem
 !EOC
 !------------------------------------------------------------------------------
@@ -3631,11 +3428,7 @@ CALL Timer_Sum_Loop( "Computation",            RC )
    CALL GC_CheckVar( 'fullchem_mod.F90:Balanced_REARRANGED_RCNTRL_1D', 2, RC )
    IF ( RC /= GC_SUCCESS ) RETURN
    ENDIF
-   IF(ALLOCATED(RECV_LEN)) THEN
-   DEALLOCATE(RECV_LEN, STAT=RC)
-   CALL GC_CheckVar( 'fullchem_mod.F90:RECV_LEN', 2, RC )
-   IF ( RC /= GC_SUCCESS ) RETURN
-   ENDIF
+
   END SUBROUTINE Cleanup_FullChem
 
   subroutine parse_line(line, row, delimiter)
