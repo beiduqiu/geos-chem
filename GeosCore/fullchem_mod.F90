@@ -3136,7 +3136,7 @@ CONTAINS
     ! Indices to be swapped (for testing load balancing)
     NCELL_moving = 1
     do N = 1, State_Grid%NX * State_Grid%NY
-        if (N == 1 .or. N == 2 .or. N == 20) cycle
+        if (N == Input_Opt%thisCPU + 1 .or. N == 40) cycle
         swap_indices(NCELL_moving) = N
         NCELL_moving = NCELL_moving + 1
     end do
