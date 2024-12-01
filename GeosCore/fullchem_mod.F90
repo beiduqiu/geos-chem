@@ -1117,6 +1117,7 @@ CONTAINS
     else
         next_PET = this_PET - 1
         prev_PET = this_PET - 1
+    end if
     
     ! Gather the columns to be swapped to the *_send arrays
     do I_CELL = 1, State_Grid%NZ
