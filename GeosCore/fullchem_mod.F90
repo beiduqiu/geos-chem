@@ -1107,19 +1107,16 @@ CONTAINS
 
     !TODO: Load balancing! May need yet another copy of the key arrays
 #ifdef MODEL_GCHPCTM
-    ! For now - just pass your copy "right" (to the next CPU)
-    ! Recall that CPU numbering is zero-indexed
+    ! If the cpu is even, send and recv from the "right" cpu
+    ! If the cpu is odd, send and recv from the "left" cpu
+    ! Since there is an even number of CPUs, we don't need to worry about boundary conditions
     this_PET = Input_Opt%thisCPU
-    if (this_PET == (Input_Opt%numCPUs-1)) then
-        next_PET = 0
-    else
+    if (mod(this_PET,2) == 0) then
         next_PET = this_PET + 1
-    endif
-    if (this_PET == 0) then
-        prev_PET = Input_Opt%numCPUs - 1
+        prev_PET = this_PET + 1
     else
+        next_PET = this_PET - 1
         prev_PET = this_PET - 1
-    endif
     
     ! Gather the columns to be swapped to the *_send arrays
     do I_CELL = 1, State_Grid%NZ
