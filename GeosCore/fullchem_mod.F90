@@ -234,7 +234,7 @@ CONTAINS
     ! All the KPP inputs remapped to a 1-D array
     INTEGER                :: NCELL, NCELL_local, I_CELL,I_CELL2, NCELL_balanced
     INTEGER                :: this_PET, prev_PET, next_PET, request
-    INTEGER                :: unit_number, read_count, SlotNumber,ios,sendPointer,sendLength,sendTo, recvFrom, RECV_CUR,count,SEND_CUR,Flag
+    INTEGER                :: unit_number, read_count, SlotNumber,ios,sendTo, recvFrom
     ! For tagged CO saving
     REAL(fp)               :: LCH4, PCO_TOT, PCO_CH4, PCO_NMVOC
 
@@ -1110,19 +1110,11 @@ CONTAINS
 #ifdef MODEL_GCHPCTM
     ! For now - just pass your copy "right" (to the next CPU)
     ! Recall that CPU numbering is zero-indexed
-      this_PET = Input_Opt%thisCPU
-      if (mod(this_PET,2) == 0) then
-         next_PET = this_PET + 1
-         prev_PET = this_PET + 1
-      else
-         next_PET = this_PET - 1
-         prev_PET = this_PET - 1
-      end if
 
     CALL Timer_Start( TimerName = "SendAssignmentTimer",                       &
-    InLoop    = .TRUE.,                              &
-    ThreadNum = Thread,                              &
-    RC        = RC                                  )   
+                              InLoop    = .TRUE.,                              &
+                              ThreadNum = Thread,                              &
+                              RC        = RC                                  )   
    delimiter = ','
    unit_number = 10
    read_count = read_count + 1
@@ -1171,23 +1163,20 @@ CONTAINS
    next_PET = sendTo
    prev_PET = recvFrom
    NCELL_balanced = NCELL_local
-  !print *, "PET:", this_PET, " SendTo:", sendTo, " RecvFrom:", recvFrom, "send length:", sendLength,"NCELL local: ", NCELL_local, "NCELL balanced: ", NCELL_balanced,"num CPUs: ", Input_Opt%numCPUs,"next_PET", next_PET,"Prev pet", prev_PET
-   ! Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-   ! Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    ! Pass the actual data
 
-         Call MPI_Sendrecv(C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, next_PET, 0, &
-         C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, prev_PET, 0, &
-         Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+      Call MPI_Sendrecv(C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, next_PET, 0, &
+                        C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, prev_PET, 0, &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
       Call MPI_Sendrecv(RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, next_PET, 1, &
-         RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, prev_PET, 1, &
-         Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+                        RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, prev_PET, 1, &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
       Call MPI_Sendrecv(I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, next_PET, 2, &
-         I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, prev_PET, 2, &
-         Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+                        I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, prev_PET, 2, &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
       Call MPI_Sendrecv(R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, next_PET, 3, &
-         R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, prev_PET, 3, &
-         Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+                        R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, prev_PET, 3, &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
 
       ! Copy c_1d to c_balanced
       C_balanced(:, :) = C_1D(:, :)
@@ -1198,10 +1187,10 @@ CONTAINS
       ! Unpack the columns from the *_recv arrays
       do I_CELL = 1, State_Grid%NZ
          do i = 1, NCELL_moving
-         C_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = C_recv(:,(I_CELL-1)*NCELL_moving+i)
-         RCONST_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = RCONST_recv(:,(I_CELL-1)*NCELL_moving+i)
-         ICNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = I_recv(:,(I_CELL-1)*NCELL_moving+i)
-         RCNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_recv(:,(I_CELL-1)*NCELL_moving+i)
+            C_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = C_recv(:,(I_CELL-1)*NCELL_moving+i)
+            RCONST_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = RCONST_recv(:,(I_CELL-1)*NCELL_moving+i)
+            ICNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = I_recv(:,(I_CELL-1)*NCELL_moving+i)
+            RCNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_recv(:,(I_CELL-1)*NCELL_moving+i)
          end do
       end do
 #endif
@@ -1431,17 +1420,17 @@ end do
 
 ! Pass the actual data
 Call MPI_Sendrecv(C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, prev_PET, 4, &
-             C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, next_PET, 4, &
-             Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC) 
+                  C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, next_PET, 4, &
+                  Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC) 
 Call MPI_Sendrecv(RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, prev_PET, 5, &
-             RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, next_PET, 5, &
-             Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+                  RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, next_PET, 5, &
+                  Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
 Call MPI_Sendrecv(I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, prev_PET, 6, &
-             I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, next_PET, 6, &
-             Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+                  I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, next_PET, 6, &
+                  Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
 Call MPI_Sendrecv(R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, prev_PET, 7, &
-             R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, next_PET, 7, &
-             Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+                  R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, next_PET, 7, &
+                  Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
 
 ! Copy c_balanced to c_1d
 C_1D(:,:) = C_balanced(:,:)
@@ -1458,7 +1447,6 @@ do I_CELL = 1, State_Grid%NZ
        RSTATE_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_send(:,(I_CELL-1)*NCELL_moving+i)
    end do
 end do
-!print *, "update version 118"
 CALL Timer_Sum_Loop( "Computation",            RC )
 ! order is Timerflag, Timertypr,PET_number, interval,sendTo, recvFrom, sendLength, RECV_Length, CommunicationTime 
 ! WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","Communication,", this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
@@ -3212,14 +3200,6 @@ CALL Timer_Sum_Loop( "Computation",            RC )
            CALL GC_Error( 'Failed to allocate swap_indices', RC, ThisLoc )
            RETURN
        End If
-           ! Indices to be swapped (for testing load balancing)
-    NCELL_moving = 1
-    do N = 1, State_Grid%NX * State_Grid%NY
-        if (N == Input_Opt%thisCPU + 1 .or. N == 40) cycle
-        swap_indices(NCELL_moving) = N
-        NCELL_moving = NCELL_moving + 1
-    end do
-    NCELL_moving = NCELL_moving - 1  ! Length of swap_indices
   END SUBROUTINE Init_FullChem
 !EOC
 !------------------------------------------------------------------------------
