@@ -1136,7 +1136,6 @@ CONTAINS
          end if
    end do
    close(unit_number)
-   sendPointer = 1
    sendTo = 0
    recvFrom = 0
    NCELL_moving = 1
@@ -1448,21 +1447,9 @@ do I_CELL = 1, State_Grid%NZ
    end do
 end do
 CALL Timer_Sum_Loop( "Computation",            RC )
-! order is Timerflag, Timertypr,PET_number, interval,sendTo, recvFrom, sendLength, RECV_Length, CommunicationTime 
-! WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","Communication,", this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
-! Call Timer_Print("Communication", RC)
- WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","Computation,",this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
+
+ WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","Computation,",this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ","
  CALL Timer_Print("Computation", RC)
-! WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","ReverseCommunicationTimer,", this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
-! Call Timer_Print("ReverseCommunicationTimer", RC)
-! WRITE(*, '(A,A,I0, A,I0,A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","CopyTimer1,", this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
-! Call Timer_Print("CopyTimer1", RC)
-! WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","CopyTimer2,",this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
-! Call Timer_Print("CopyTimer2", RC)
-! WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","SendAssignmentTimer,",this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
-! Call Timer_Print("SendAssignmentTimer", RC)
-! WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","Integrate1,",this_PET, ',',read_count, ',' ,sendTo,",",recvFrom, ",",sendLength,",",RECV_CUR,","
-! Call Timer_Print( "     Integrate 1",         RC )
 
 #endif
     
