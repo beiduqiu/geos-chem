@@ -1099,7 +1099,7 @@ CONTAINS
     ! NCELL_local: Number of cells in local domain which need a calculation
     ! NCELL:       Number of cells we are running a calculation for after balancing
     NCELL = NCELL_local
-
+    
     ! Output
     ISTATUS_1D       = 0.0e+0_fp
     RSTATE_1D        = 0.0e+0_fp
@@ -1115,6 +1115,14 @@ CONTAINS
                               InLoop    = .TRUE.,                              &
                               ThreadNum = Thread,                              &
                               RC        = RC                                  )   
+   this_PET = Input_Opt%thisCPU
+   if (mod(this_PET,2) == 0) then
+         next_PET = this_PET + 1
+         prev_PET = this_PET + 1
+   else
+         next_PET = this_PET - 1
+         prev_PET = this_PET - 1
+   end if
    delimiter = ','
    unit_number = 10
    read_count = read_count + 1
@@ -1146,7 +1154,7 @@ CONTAINS
          NCELL_moving = NCELL_moving + 1
       ENDIF
    ENDDO
-
+   NCELL_moving = NCELL_moving - 1
 
    do I_CELL = 1, State_Grid%NZ
       do i = 1, NCELL_moving
@@ -1156,26 +1164,23 @@ CONTAINS
           R_send(:,(I_CELL-1)*NCELL_moving+i) = RCNTRL_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
       end do
   end do
-
-
    recvFrom = sendTo
    next_PET = sendTo
    prev_PET = recvFrom
    NCELL_balanced = NCELL_local
    ! Pass the actual data
-
-      Call MPI_Sendrecv(C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, next_PET, 0, &
-                        C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, prev_PET, 0, &
-                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
-      Call MPI_Sendrecv(RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, next_PET, 1, &
-                        RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, prev_PET, 1, &
-                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
-      Call MPI_Sendrecv(I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, next_PET, 2, &
-                        I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, prev_PET, 2, &
-                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
-      Call MPI_Sendrecv(R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, next_PET, 3, &
-                        R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, prev_PET, 3, &
-                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+   Call MPI_Sendrecv(C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, next_PET, 0, &
+                     C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, prev_PET, 0, &
+                     Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+   Call MPI_Sendrecv(RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, next_PET, 1, &
+                     RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, prev_PET, 1, &
+                     Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+   Call MPI_Sendrecv(I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, next_PET, 2, &
+                     I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, prev_PET, 2, &
+                     Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+   Call MPI_Sendrecv(R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, next_PET, 3, &
+                     R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, prev_PET, 3, &
+                     Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
 
       ! Copy c_1d to c_balanced
       C_balanced(:, :) = C_1D(:, :)
