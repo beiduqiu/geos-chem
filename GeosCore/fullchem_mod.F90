@@ -39,7 +39,7 @@ MODULE FullChem_Mod
   INTEGER               :: id_OH,  id_HO2,  id_O3P,  id_O1D, id_CH4
   INTEGER               :: id_PCO, id_LCH4, id_NH3,  id_SO4
   INTEGER               :: id_SALAAL, id_SALCAL, id_SALC, id_SALA
-  INTEGER               :: NCELL_MAX
+  INTEGER               :: NCELL_MAX,NCELL_moving
 #ifdef MODEL_GEOS
   INTEGER               :: id_O3
   INTEGER               :: id_A3O2, id_ATO2, id_B3O2, id_BRO2
@@ -88,20 +88,17 @@ MODULE FullChem_Mod
   REAL(fP), ALLOCATABLE  :: RCNTRL_balanced(:,:)
   INTEGER,  ALLOCATABLE  :: ISTATUS_balanced(:,:)
   REAL(fP), ALLOCATABLE  :: RSTATE_balanced(:,:)
-  REAL(fp), ALLOCATABLE  :: REARRANGED_C_1D(:,:)
-  REAL(fP), ALLOCATABLE  :: REARRANGED_RCONST_1D(:,:)
-  INTEGER,  ALLOCATABLE  :: REARRANGED_ICNTRL_1D(:,:)
-  REAL(fP), ALLOCATABLE  :: REARRANGED_RCNTRL_1D(:,:)
-  REAL(fP), ALLOCATABLE  :: REARRANGED_RSTATE_1D(:,:)
-  INTEGER,  ALLOCATABLE  :: REARRANGED_ISTATUS_1D(:,:)
-  REAL(fp), ALLOCATABLE  :: Balanced_REARRANGED_C_1D(:,:)
-  REAL(fP), ALLOCATABLE  :: Balanced_REARRANGED_RCONST_1D(:,:)
-  INTEGER,  ALLOCATABLE  :: Balanced_REARRANGED_ICNTRL_1D(:,:)
-  REAL(fP), ALLOCATABLE  :: Balanced_REARRANGED_RCNTRL_1D(:,:)
-  REAL(fP), ALLOCATABLE  :: Balanced_REARRANGED_RSTATE_1D(:,:)
-  INTEGER,  ALLOCATABLE  :: Balanced_REARRANGED_ISTATUS_1D(:,:)
+  REAL(fp), ALLOCATABLE  :: C_send(:,:)
+  REAL(fP), ALLOCATABLE  :: RCONST_send(:,:)
+  INTEGER,  ALLOCATABLE  :: I_send(:,:)
+  REAL(fP), ALLOCATABLE  :: R_send(:,:)
+  REAL(fp), ALLOCATABLE  :: C_recv(:,:)
+  REAL(fP), ALLOCATABLE  :: RCONST_recv(:,:)
+  REAL(fP), ALLOCATABLE  :: R_recv(:,:)
+  INTEGER,  ALLOCATABLE  :: I_recv(:,:)
   INTEGER,  ALLOCATABLE  :: assignments(:,:)
- 
+  INTEGER,  ALLOCATABLE  :: swap_indices(:)
+
   character(len=2000) :: line
   character(len=1) :: delimiter
   character(len=200) :: assignmentPath,read_count_str
@@ -1113,21 +1110,15 @@ CONTAINS
 #ifdef MODEL_GCHPCTM
     ! For now - just pass your copy "right" (to the next CPU)
     ! Recall that CPU numbering is zero-indexed
-    this_PET = Input_Opt%thisCPU
-   !  if (this_PET == (Input_Opt%numCPUs-2)) then
-   !      next_PET = 0
-   !  else if (this_PET == (Input_Opt%numCPUs-1)) then
-   !      next_PET = 1
-   !  else
-   !      next_PET = this_PET + 2
-   !  endif
-   !  if (this_PET == 0) then
-   !      prev_PET = Input_Opt%numCPUs - 2
-   ! else if (this_PET == 1) then
-   !      prev_PET = Input_Opt%numCPUs - 1
-   !  else
-   !      prev_PET = this_PET - 2
-   !  endif
+      this_PET = Input_Opt%thisCPU
+      if (mod(this_PET,2) == 0) then
+         next_PET = this_PET + 1
+         prev_PET = this_PET + 1
+      else
+         next_PET = this_PET - 1
+         prev_PET = this_PET - 1
+      end if
+
     CALL Timer_Start( TimerName = "SendAssignmentTimer",                       &
     InLoop    = .TRUE.,                              &
     ThreadNum = Thread,                              &
@@ -1137,7 +1128,6 @@ CONTAINS
    read_count = read_count + 1
    write(read_count_str, '(I0)') read_count / 6
    assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/restricted/interval_' // trim(read_count_str) // '.csv'
-   !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/limited_dynamic_1_[1.0,1.001]/interval_108.csv'
    assignments = -1
    !assignmentPath = '/home/w.zifan1/GCHP_washu/Run/Assignment/swap.csv'
    open(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=ios)
@@ -1154,52 +1144,66 @@ CONTAINS
          end if
    end do
    close(unit_number)
-   REARRANGED_C_1D = 0
-   REARRANGED_ICNTRL_1D = 0
-   REARRANGED_ISTATUS_1D = 0
-   REARRANGED_RCNTRL_1D = 0
-   REARRANGED_RCONST_1D = 0
-   REARRANGED_RSTATE_1D = 0
-
    sendPointer = 1
    sendTo = 0
    recvFrom = 0
+   NCELL_moving = 1
    do I_CELL = 1, 144
       IF(assignments(this_PET+1,I_CELL)/= -1 .and. assignments(this_PET+1,I_CELL) /= this_PET) then
          sendTo = assignments(this_PET+1,I_CELL)
+         swap_indices(NCELL_moving) = I_CELL
+         NCELL_moving = NCELL_moving + 1
       ENDIF
    ENDDO
+
+
+   do I_CELL = 1, State_Grid%NZ
+      do i = 1, NCELL_moving
+          C_send(:,(I_CELL-1)*NCELL_moving+i) = C_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+          RCONST_send(:,(I_CELL-1)*NCELL_moving+i) = RCONST_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+          I_send(:,(I_CELL-1)*NCELL_moving+i) = ICNTRL_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+          R_send(:,(I_CELL-1)*NCELL_moving+i) = RCNTRL_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+      end do
+  end do
+
+
    recvFrom = sendTo
-  next_PET = sendTo
-  prev_PET = recvFrom
-  NCELL_balanced = NCELL_local
+   next_PET = sendTo
+   prev_PET = recvFrom
+   NCELL_balanced = NCELL_local
   !print *, "PET:", this_PET, " SendTo:", sendTo, " RecvFrom:", recvFrom, "send length:", sendLength,"NCELL local: ", NCELL_local, "NCELL balanced: ", NCELL_balanced,"num CPUs: ", Input_Opt%numCPUs,"next_PET", next_PET,"Prev pet", prev_PET
    ! Call MPI_Isend(NCELL_local,1,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
    ! Call MPI_Recv(NCELL_balanced,1,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
    ! Pass the actual data
 
-   Call MPI_Isend(C_1D(1,1),NCELL_local*NSPEC,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-   Call MPI_Isend(RCONST_1D(1,1),NCELL_local*NREACT,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-   Call MPI_Isend(ICNTRL_1D(1,1),NCELL_local*20,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,request,RC)
-   Call MPI_Isend(RCNTRL_1D(1,1),NCELL_local*20,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,request,RC)
-   Call MPI_Recv(C_balanced(1,1),NCELL_balanced*NSPEC,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-   Call MPI_Recv(RCONST_balanced(1,1),NCELL_balanced*NREACT,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-   Call MPI_Recv(ICNTRL_balanced(1,1),NCELL_balanced*20,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-   Call MPI_Recv(RCNTRL_balanced(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
+         Call MPI_Sendrecv(C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, next_PET, 0, &
+         C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, prev_PET, 0, &
+         Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+      Call MPI_Sendrecv(RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, next_PET, 1, &
+         RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, prev_PET, 1, &
+         Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+      Call MPI_Sendrecv(I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, next_PET, 2, &
+         I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, prev_PET, 2, &
+         Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+      Call MPI_Sendrecv(R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, next_PET, 3, &
+         R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, prev_PET, 3, &
+         Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
 
-   do I_CELL = 1, 144
-      IF(assignments(this_PET+1,I_CELL)/= -1 .and. assignments(this_PET+1,I_CELL) /= this_PET) then
-         do I_CELL2 = 1, State_Grid%NZ
-            flag = (I_CELL2-1) * 144 + I_CELL
-            if(flag <= NCELL_local) then
-               C_balanced(:,flag) = C_1D(:,flag)
-               RCONST_balanced(:,flag) = RCONST_1D(:,flag)
-               ICNTRL_balanced(:,flag) = ICNTRL_1D(:,flag)
-               RCNTRL_balanced(:,flag) = RCNTRL_1D(:,flag)
-            endif
-         ENDDO
-      ENDIF
-   ENDDO
+      ! Copy c_1d to c_balanced
+      C_balanced(:, :) = C_1D(:, :)
+      RCONST_balanced(:, :) = RCONST_1D(:, :)
+      ICNTRL_balanced(:, :) = ICNTRL_1D(:, :)
+      RCNTRL_balanced(:, :) = RCNTRL_1D(:, :)
+
+      ! Unpack the columns from the *_recv arrays
+      do I_CELL = 1, State_Grid%NZ
+         do i = 1, NCELL_moving
+         C_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = C_recv(:,(I_CELL-1)*NCELL_moving+i)
+         RCONST_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = RCONST_recv(:,(I_CELL-1)*NCELL_moving+i)
+         ICNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = I_recv(:,(I_CELL-1)*NCELL_moving+i)
+         RCNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_recv(:,(I_CELL-1)*NCELL_moving+i)
+         end do
+      end do
 #endif
 
 CALL Timer_Sum_Loop( "Communication",            RC )
@@ -1415,29 +1419,45 @@ CALL Timer_Start( TimerName = "Computation",                       &
 
 #ifdef MODEL_GCHPCTM
 
+    ! Gather the columns to be swapped to the *_recv arrays
+do I_CELL = 1, State_Grid%NZ
+   do i = 1, NCELL_moving
+       C_recv(:,(I_CELL-1)*NCELL_moving+i) = C_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+       RCONST_recv(:,(I_CELL-1)*NCELL_moving+i) = RCONST_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+       I_recv(:,(I_CELL-1)*NCELL_moving+i) = ISTATUS_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+       R_recv(:,(I_CELL-1)*NCELL_moving+i) = RSTATE_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+   end do
+end do
 
-Call MPI_Isend(C_balanced(1,1),NCELL_balanced*NSPEC,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,request,RC)
-! The rest are needed for diagnostics only
-Call MPI_Isend(ISTATUS_balanced(1,1),NCELL_balanced*20,MPI_INTEGER,prev_PET,0,Input_Opt%mpiComm,request,RC)
-Call MPI_Isend(RSTATE_balanced(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,request,RC)
-Call MPI_Isend(RCONST_balanced(1,1),NCELL_balanced*NREACT,MPI_DOUBLE_PRECISION,prev_PET,0,Input_Opt%mpiComm,request,RC)
-Call MPI_Recv(C_1D(1,1),NCELL_local*NSPEC,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-Call MPI_Recv(ISTATUS_1D(1,1),NCELL_local*20,MPI_INTEGER,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-Call MPI_Recv(RSTATE_1D(1,1),NCELL_balanced*20,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
-Call MPI_Recv(RCONST_1D(1,1),NCELL_local*NREACT,MPI_DOUBLE_PRECISION,next_PET,0,Input_Opt%mpiComm,MPI_STATUS_IGNORE,RC)
- do I_CELL = 1, 144
-    IF(assignments(this_PET+1,I_CELL)/= -1 .and. assignments(this_PET+1,I_CELL) /= this_PET) then
-       do I_CELL2 = 1, State_Grid%NZ
-          flag = (I_CELL2-1) * 144 + I_CELL
-         if(flag <= NCELL_local) then
-            C_1D(:,flag) = C_balanced(:,flag)
-            RCONST_1D(:,flag) = RCONST_balanced(:,flag)
-            ISTATUS_1D(:,flag) = ISTATUS_balanced(:,flag)
-            RSTATE_1D(:,flag) = RSTATE_balanced(:,flag)
-         endif
-       ENDDO
-    ENDIF
- ENDDO
+! Pass the actual data
+Call MPI_Sendrecv(C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, prev_PET, 4, &
+             C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, next_PET, 4, &
+             Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC) 
+Call MPI_Sendrecv(RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, prev_PET, 5, &
+             RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, next_PET, 5, &
+             Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+Call MPI_Sendrecv(I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, prev_PET, 6, &
+             I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, next_PET, 6, &
+             Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+Call MPI_Sendrecv(R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, prev_PET, 7, &
+             R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, next_PET, 7, &
+             Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC)
+
+! Copy c_balanced to c_1d
+C_1D(:,:) = C_balanced(:,:)
+RCONST_1D(:,:) = RCONST_balanced(:,:)
+ISTATUS_1D(:,:) = ISTATUS_balanced(:,:)
+RSTATE_1D(:,:) = RSTATE_balanced(:,:)
+
+! Unpack the columns from the *_send arrays
+do I_CELL = 1, State_Grid%NZ
+   do i = 1, NCELL_moving
+       C_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = C_send(:,(I_CELL-1)*NCELL_moving+i)
+       RCONST_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = RCONST_send(:,(I_CELL-1)*NCELL_moving+i)
+       ISTATUS_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = I_send(:,(I_CELL-1)*NCELL_moving+i)
+       RSTATE_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_send(:,(I_CELL-1)*NCELL_moving+i)
+   end do
+end do
 !print *, "update version 118"
 CALL Timer_Sum_Loop( "Computation",            RC )
 ! order is Timerflag, Timertypr,PET_number, interval,sendTo, recvFrom, sendLength, RECV_Length, CommunicationTime 
@@ -3041,7 +3061,6 @@ CALL Timer_Sum_Loop( "Computation",            RC )
     ! TODO: add MPI logic to figure this out
     NCELL_max = (State_Grid%NX * State_Grid%NY * State_Grid%NZ)
     ! NCELL_max:   Max number of cells to be computed on any domain
-    print *, 'Enter initilization on Pet ', Input_Opt%thisCPU
     Call Timer_Add("Communication", RC)
     Call Timer_Add("Computation", RC)
     Call Timer_Add("CopyTimer1", RC)
@@ -3139,79 +3158,68 @@ CALL Timer_Sum_Loop( "Computation",            RC )
              CALL GC_Error( 'Failed to allocate assignments', RC, ThisLoc )
              RETURN
        End If
-       Allocate(REARRANGED_C_1D (NSPEC,NCELL_max) , STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_C_1D', 0, RC )
+       Allocate(C_send (NSPEC,NCELL_max) , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:C_send', 0, RC )
        IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_C_1D', RC, ThisLoc )
+          CALL GC_Error( 'Failed to allocate C_send', RC, ThisLoc )
           RETURN
        End If
-       Allocate(REARRANGED_RCONST_1D (NREACT,NCELL_max), STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCONST_1D', 0, RC )
+       Allocate(RCONST_send (NREACT,NCELL_max), STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:RCONST_send', 0, RC )
        IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_RCONST_1D', RC, ThisLoc )
+          CALL GC_Error( 'Failed to allocate RCONST_send', RC, ThisLoc )
           RETURN
        End If
-       Allocate(REARRANGED_ISTATUS_1D(20,NCELL_max)    , STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ISTATUS_1D', 0, RC )
+       Allocate(I_send (20,NCELL_max)    , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:I_send', 0, RC )
        IF ( RC /= GC_SUCCESS ) Then
-             CALL GC_Error( 'Failed to allocate REARRANGED_ISTATUS_1D', RC, ThisLoc )
-             RETURN
-       End If
-    Allocate(REARRANGED_RSTATE_1D (20,NCELL_max)    , STAT=RC)
-    CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RSTATE_1D', 0, RC )
-       IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_RSTATE_1D', RC, ThisLoc )
+          CALL GC_Error( 'Failed to allocate I_send', RC, ThisLoc )
           RETURN
        End If
-       Allocate(REARRANGED_ICNTRL_1D (20,NCELL_max)    , STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ICNTRL_1D', 0, RC )
+       Allocate(R_send (20,NCELL_max)    , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:R_send', 0, RC )
        IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_ICNTRL_1D', RC, ThisLoc )
+          CALL GC_Error( 'Failed to allocate R_send', RC, ThisLoc )
           RETURN
        End If
-       Allocate(REARRANGED_RCNTRL_1D (20,NCELL_max)    , STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCNTRL_1D', 0, RC )
+       Allocate(C_recv (NSPEC,NCELL_max) , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:C_send', 0, RC )
        IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_RCNTRL_1D', RC, ThisLoc )
+          CALL GC_Error( 'Failed to allocate C_send', RC, ThisLoc )
           RETURN
        End If
-       Allocate(Balanced_REARRANGED_C_1D (NSPEC,NCELL_max) , STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_C_1D', 0, RC )
+       Allocate(RCONST_recv (NREACT,NCELL_max), STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:RCONST_send', 0, RC )
        IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_C_1D', RC, ThisLoc )
+          CALL GC_Error( 'Failed to allocate RCONST_send', RC, ThisLoc )
           RETURN
        End If
-       Allocate(Balanced_REARRANGED_RCONST_1D (NREACT,NCELL_max), STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCONST_1D', 0, RC )
+       Allocate(I_recv (20,NCELL_max)    , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:I_send', 0, RC )
        IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_RCONST_1D', RC, ThisLoc )
+          CALL GC_Error( 'Failed to allocate I_send', RC, ThisLoc )
           RETURN
        End If
-       Allocate(Balanced_REARRANGED_ISTATUS_1D(20,NCELL_max)    , STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ISTATUS_1D', 0, RC )
+       Allocate(R_recv (20,NCELL_max)    , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:R_send', 0, RC )
        IF ( RC /= GC_SUCCESS ) Then
-             CALL GC_Error( 'Failed to allocate REARRANGED_ISTATUS_1D', RC, ThisLoc )
-             RETURN
-       End If
-    Allocate(Balanced_REARRANGED_RSTATE_1D (20,NCELL_max)    , STAT=RC)
-    CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RSTATE_1D', 0, RC )
-       IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_RSTATE_1D', RC, ThisLoc )
-          RETURN
-       End If
-       Allocate(Balanced_REARRANGED_ICNTRL_1D (20,NCELL_max)    , STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ICNTRL_1D', 0, RC )
-       IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_ICNTRL_1D', RC, ThisLoc )
-          RETURN
-       End If
-       Allocate(Balanced_REARRANGED_RCNTRL_1D (20,NCELL_max)    , STAT=RC)
-       CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCNTRL_1D', 0, RC )
-       IF ( RC /= GC_SUCCESS ) Then
-          CALL GC_Error( 'Failed to allocate REARRANGED_RCNTRL_1D', RC, ThisLoc )
+          CALL GC_Error( 'Failed to allocate R_send', RC, ThisLoc )
           RETURN
        End If   
-
+       Allocate(swap_indices (State_Grid%NX * State_Grid%NY) , STAT=RC)
+       CALL GC_CheckVar( 'fullchem_mod.F90:swap_indices', 0, RC )
+       IF ( RC /= GC_SUCCESS ) Then
+           CALL GC_Error( 'Failed to allocate swap_indices', RC, ThisLoc )
+           RETURN
+       End If
+           ! Indices to be swapped (for testing load balancing)
+    NCELL_moving = 1
+    do N = 1, State_Grid%NX * State_Grid%NY
+        if (N == Input_Opt%thisCPU + 1 .or. N == 40) cycle
+        swap_indices(NCELL_moving) = N
+        NCELL_moving = NCELL_moving + 1
+    end do
+    NCELL_moving = NCELL_moving - 1  ! Length of swap_indices
   END SUBROUTINE Init_FullChem
 !EOC
 !------------------------------------------------------------------------------
@@ -3364,69 +3372,53 @@ CALL Timer_Sum_Loop( "Computation",            RC )
        CALL GC_CheckVar( 'fullchem_mod.F90:RSTATE_balanced', 2, RC )
        IF ( RC /= GC_SUCCESS ) RETURN
     ENDIF
-    IF(ALLOCATED(REARRANGED_RSTATE_1D)) THEN
-      DEALLOCATE(REARRANGED_RSTATE_1D, STAT=RC)
-      CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RSTATE_1D', 2, RC )
-      IF ( RC /= GC_SUCCESS ) RETURN
-      ENDIF
-   IF(ALLOCATED(REARRANGED_ISTATUS_1D)) THEN
-      DEALLOCATE(REARRANGED_ISTATUS_1D, STAT=RC)
-      CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ISTATUS_1D', 2, RC )
-      IF ( RC /= GC_SUCCESS ) RETURN
-      ENDIF
 
-   IF(ALLOCATED(REARRANGED_C_1D)) THEN
-   DEALLOCATE(REARRANGED_C_1D, STAT=RC)
-   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_C_1D', 2, RC )
+   IF(ALLOCATED(C_send)) THEN
+   DEALLOCATE(C_send, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:C_send', 2, RC )
    IF ( RC /= GC_SUCCESS ) RETURN
    ENDIF
-   IF(ALLOCATED(REARRANGED_RCONST_1D)) THEN
-   DEALLOCATE(REARRANGED_RCONST_1D, STAT=RC)
-   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCONST_1D', 2, RC )
+   IF(ALLOCATED(RCONST_send)) THEN
+   DEALLOCATE(RCONST_send, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:RCONST_send', 2, RC )
    IF ( RC /= GC_SUCCESS ) RETURN
    ENDIF
 
-   IF(ALLOCATED(REARRANGED_ICNTRL_1D)) THEN
-   DEALLOCATE(REARRANGED_ICNTRL_1D, STAT=RC)
-   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_ICNTRL_1D', 2, RC )
+   IF(ALLOCATED(I_send)) THEN
+   DEALLOCATE(I_send, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:I_send', 2, RC )
    IF ( RC /= GC_SUCCESS ) RETURN
    ENDIF
-   IF(ALLOCATED(REARRANGED_RCNTRL_1D)) THEN
-   DEALLOCATE(REARRANGED_RCNTRL_1D, STAT=RC)
-   CALL GC_CheckVar( 'fullchem_mod.F90:REARRANGED_RCNTRL_1D', 2, RC )
+   IF(ALLOCATED(R_send)) THEN
+   DEALLOCATE(R_send, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:R_send', 2, RC )
    IF ( RC /= GC_SUCCESS ) RETURN
    ENDIF
-   IF(ALLOCATED(Balanced_REARRANGED_RSTATE_1D)) THEN
-      DEALLOCATE(Balanced_REARRANGED_RSTATE_1D, STAT=RC)
-      CALL GC_CheckVar( 'fullchem_mod.F90:Balanced_REARRANGED_RSTATE_1D', 2, RC )
+   IF(ALLOCATED(R_recv)) THEN
+      DEALLOCATE(R_recv, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:R_recv', 2, RC )
       IF ( RC /= GC_SUCCESS ) RETURN
       ENDIF
-   IF(ALLOCATED(Balanced_REARRANGED_ISTATUS_1D)) THEN
-      DEALLOCATE(Balanced_REARRANGED_ISTATUS_1D, STAT=RC)
-      CALL GC_CheckVar( 'fullchem_mod.F90:Balanced_REARRANGED_ISTATUS_1D', 2, RC )
+   IF(ALLOCATED(I_recv)) THEN
+      DEALLOCATE(I_recv, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:I_recv', 2, RC )
       IF ( RC /= GC_SUCCESS ) RETURN
       ENDIF
 
-   IF(ALLOCATED(Balanced_REARRANGED_C_1D)) THEN
-   DEALLOCATE(Balanced_REARRANGED_C_1D, STAT=RC)
-   CALL GC_CheckVar( 'fullchem_mod.F90:Balanced_REARRANGED_C_1D', 2, RC )
+   IF(ALLOCATED(C_recv)) THEN
+   DEALLOCATE(C_recv, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:C_recv', 2, RC )
    IF ( RC /= GC_SUCCESS ) RETURN
    ENDIF
-   IF(ALLOCATED(Balanced_REARRANGED_RCONST_1D)) THEN
-   DEALLOCATE(Balanced_REARRANGED_RCONST_1D, STAT=RC)
-   CALL GC_CheckVar( 'fullchem_mod.F90:Balanced_REARRANGED_RCONST_1D', 2, RC )
+   IF(ALLOCATED(RCONST_recv)) THEN
+   DEALLOCATE(RCONST_recv, STAT=RC)
+   CALL GC_CheckVar( 'fullchem_mod.F90:RCONST_recv', 2, RC )
    IF ( RC /= GC_SUCCESS ) RETURN
    ENDIF
-
-   IF(ALLOCATED(Balanced_REARRANGED_ICNTRL_1D)) THEN
-   DEALLOCATE(Balanced_REARRANGED_ICNTRL_1D, STAT=RC)
-   CALL GC_CheckVar( 'fullchem_mod.F90:Balanced_REARRANGED_ICNTRL_1D', 2, RC )
-   IF ( RC /= GC_SUCCESS ) RETURN
-   ENDIF
-   IF(ALLOCATED(Balanced_REARRANGED_RCNTRL_1D)) THEN
-   DEALLOCATE(Balanced_REARRANGED_RCNTRL_1D, STAT=RC)
-   CALL GC_CheckVar( 'fullchem_mod.F90:Balanced_REARRANGED_RCNTRL_1D', 2, RC )
-   IF ( RC /= GC_SUCCESS ) RETURN
+   If ( ALLOCATED( swap_indices ) ) Then
+      Deallocate(swap_indices, STAT=RC)
+      CALL GC_CheckVar( 'fullchem_mod.F90:swap_indices', 2, RC )
+      IF ( RC /= GC_SUCCESS ) RETURN
    ENDIF
 
   END SUBROUTINE Cleanup_FullChem
