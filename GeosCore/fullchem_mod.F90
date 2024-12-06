@@ -240,6 +240,7 @@ CONTAINS
     INTEGER                :: this_PET, target_PET, request
 
     ! For tagged CO saving
+    REAL(fp)               :: LCH4, PCO_TOT, PCO_CH4, PCO_NMVOC
 
     ! Objects
     TYPE(Species), POINTER :: SpcInfo
