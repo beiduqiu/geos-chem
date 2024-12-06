@@ -104,7 +104,7 @@ MODULE FullChem_Mod
 
   CHARACTER(len=2000) :: line
   CHARACTER(len=1) :: delimiter
-  CHARACTER(len=200) :: assignmentPath,read_count_str
+  CHARACTER(len=200) :: assignmentPath
   INTEGER, PARAMETER :: unit_number = 10
 
 CONTAINS
@@ -238,7 +238,7 @@ CONTAINS
     ! All the KPP inputs remapped to a 1-D array
     INTEGER                :: NCELL, NCELL_local, I_CELL, NCELL_balanced
     INTEGER                :: this_PET, target_PET, request
-    INTEGER                :: read_count, SlotNumber,ios
+
     ! For tagged CO saving
 
     ! Objects
@@ -1121,11 +1121,12 @@ CONTAINS
     this_PET = Input_Opt%thisCPU
 
     ! Read the next line from the reassignment file, which should be the assignments for this interval
-    READ(unit_number, '(A)', iostat=ios) line
-    IF (ios /= 0) THEN
-        PRINT *, 'Error reading reassignment file'
-        STOP
+    READ(unit_number, '(A)', iostat=RC) line
+    IF (RC /= 0) THEN
+        CALL GC_Error( 'Error reading reassignment file', RC, ThisLoc )
+        RETURN
     END IF
+    
     CALL parse_line(line, assignments(:), delimiter)
 
     ! Load balancing! Determine which cells are we moving and how many
@@ -1138,6 +1139,9 @@ CONTAINS
         ENDIF
     ENDDO
     NCELL_moving = NCELL_moving - 1
+
+    ! Print the swap indices array for debugging purposes
+    PRINT *, 'PET ', this_PET, ' is sending cells ', swap_indices(1:NCELL_moving)
 
     ! Copy the columns from the *_1D arrays to the *_send arrays
     DO I_CELL = 1, State_Grid%NZ
@@ -1433,7 +1437,7 @@ CONTAINS
     END DO
 
     CALL Timer_Sum_Loop( "Computation",            RC )
-    WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,","Computation,",this_PET, ',',read_count, ',' ,target_PET,",",target_PET, ","
+    WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,", "Computation,", this_PET, ',', target_PET
     CALL Timer_Print("Computation", RC)
 #endif
     
@@ -2819,7 +2823,7 @@ CONTAINS
     INTEGER            :: KppId,    N
 
     ! Strings
-    CHARACTER(LEN=255) :: ErrMsg,   ThisLoc
+    CHARACTER(LEN=255) :: ErrMsg,   ThisLoc, HomeDir
 
     !=======================================================================
     ! Init_FullChem begins here!
@@ -3183,13 +3187,14 @@ CONTAINS
     End If
 
     delimiter = ','
-    assignmentPath = '$HOME/assignment/restricted/rank_' // trim(this_PET) // '.csv'
+    CALL get_environment_variable("HOME", HomeDir)
+    assignmentPath = TRIM(HomeDir) // '/reassignment/restricted/rank_' // trim(Input_Opt%thisCPU) // '.csv'
     assignments = -1
 
-    OPEN(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=ios)
-    IF (ios /= 0) THEN
-        PRINT *, 'Error opening the file.'
-        STOP
+    OPEN(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=RC)
+    IF (RC /= 0) THEN
+        CALL GC_Error( 'Error opening reassignment file', RC, ThisLoc )
+        RETURN
     END IF
   END SUBROUTINE Init_FullChem
 !EOC
