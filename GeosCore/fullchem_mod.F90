@@ -104,7 +104,7 @@ MODULE FullChem_Mod
 
   CHARACTER(len=2000) :: line
   CHARACTER(len=1) :: delimiter
-  INTEGER, PARAMETER :: unit_number = 10
+  INTEGER, PARAMETER :: unit_number_offset = 10
 
 CONTAINS
 !EOC
@@ -259,7 +259,6 @@ CONTAINS
 
     ! Objects
     TYPE(DgnMap),  POINTER :: mapData => NULL()
-    integer :: status(MPI_STATUS_SIZE, 4)
 !
 ! !DEFINED PARAMETERS
 !
@@ -1121,7 +1120,7 @@ CONTAINS
     this_PET = Input_Opt%thisCPU
 
     ! Read the next line from the reassignment file, which should be the assignments for this interval
-    READ(unit_number, '(A)', iostat=RC) line
+    READ(unit_number_offset + this_PET, '(A)', iostat=RC) line
     IF (RC /= 0) THEN
         CALL GC_Error( 'Error reading reassignment file', RC, ThisLoc )
         RETURN
@@ -3194,7 +3193,8 @@ CONTAINS
     PRINT *, "AssignmentPath:", AssignmentPath
     assignments = -1
 
-    OPEN(unit=unit_number, file=AssignmentPath, status='old', action='read', iostat=RC)
+    ! Offset the unit number by the CPU number to avoid race conditions with other CPUs
+    OPEN(unit=unit_number_offset + Input_Opt%thisCPU, file=AssignmentPath, status='old', action='read', iostat=RC)
     IF (RC /= 0) THEN
         CALL GC_Error( 'Error opening reassignment file', RC, ThisLoc )
         RETURN
@@ -3406,7 +3406,7 @@ CONTAINS
        IF ( RC /= GC_SUCCESS ) RETURN
     ENDIF
 
-    CLOSE(unit_number)
+    CLOSE(unit_number_offset + Input_Opt%thisCPU)
   END SUBROUTINE Cleanup_FullChem
 
   SUBROUTINE parse_line(line, row, delimiter)
