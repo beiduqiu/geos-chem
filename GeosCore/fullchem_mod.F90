@@ -1111,11 +1111,7 @@ CONTAINS
     ISTATUS_balanced = 0.0e+0_fp
     RSTATE_balanced  = 0.0e+0_fp
 
-#ifdef MODEL_GCHPCTM
-    CALL Timer_Start( TimerName = "SendAssignmentTimer",                     &
-                      InLoop    = .TRUE.,                                    &
-                      ThreadNum = Thread,                                    &
-                      RC        = RC                                        )   
+#ifdef MODEL_GCHPCTM 
     ! Since we are only swapping columns, the number of cells in the balanced domain is the same as the local domain
     NCELL_balanced = NCELL_local
     this_PET = Input_Opt%thisCPU
@@ -1184,7 +1180,7 @@ CONTAINS
       end do
 #endif
 
-    CALL Timer_Sum_Loop( "Communication",            RC )
+    ! CALL Timer_Sum_Loop( "Communication",            RC )
     CALL Timer_Start(   TimerName = "Computation",                           &
                         InLoop    = .TRUE.,                                  &
                         ThreadNum = Thread,                                  &
@@ -3034,13 +3030,8 @@ CONTAINS
     ! TODO: add MPI logic to figure this out
     NCELL_max = (State_Grid%NX * State_Grid%NY * State_Grid%NZ)
     ! NCELL_max:   Max number of cells to be computed on any domain
-    Call Timer_Add("Communication", RC)
     Call Timer_Add("Computation", RC)
-    Call Timer_Add("CopyTimer1", RC)
-    Call Timer_Add("CopyTimer2", RC)
-    Call Timer_Add("ReverseCommunicationTimer", RC)
-    CALL Timer_Add("SendAssignmentTimer", RC)
-    CALL TImer_Add("     Integrate 1",         RC )
+    CALL Timer_Add("     Integrate 1",         RC )
 
     Allocate(cost_1D   (NCELL_max)       , STAT=RC)
     CALL GC_CheckVar( 'fullchem_mod.F90:cost_1D', 0, RC )
