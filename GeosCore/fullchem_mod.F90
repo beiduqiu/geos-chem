@@ -99,7 +99,7 @@ MODULE FullChem_Mod
   REAL(fP), ALLOCATABLE  :: RCNTRL_balanced(:,:)
   INTEGER,  ALLOCATABLE  :: ISTATUS_balanced(:,:)
   REAL(fP), ALLOCATABLE  :: RSTATE_balanced(:,:)
-  INTEGER,  ALLOCATABLE  :: assignments(:,:)
+  INTEGER,  ALLOCATABLE  :: assignments(:)
   INTEGER,  ALLOCATABLE  :: swap_indices(:)
 
   CHARACTER(len=2000) :: line
@@ -1119,31 +1119,20 @@ CONTAINS
     ! Since we are only swapping columns, the number of cells in the balanced domain is the same as the local domain
     NCELL_balanced = NCELL_local
     this_PET = Input_Opt%thisCPU
-    delimiter = ','
-    ! @todo: move this to the initialization section
-    assignmentPath = '$HOME/assignment/restricted/rank_' // trim(this_PET) // '.csv'
-    assignments = -1
 
-    OPEN(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=ios)
+    ! Read the next line from the reassignment file, which should be the assignments for this interval
+    READ(unit_number, '(A)', iostat=ios) line
     IF (ios /= 0) THEN
-        PRINT *, 'Error opening the file.'
+        PRINT *, 'Error reading reassignment file'
         STOP
     END IF
-
-    DO i = 1, Input_Opt%numCPUs
-        READ(unit_number, '(A)', iostat=ios) line
-        IF (ios /= 0) EXIT
-        IF (i==Input_Opt%thisCPU+1) THEN
-            CALL parse_line(line, assignments(i, :), delimiter)
-        end if
-    END DO
-    CLOSE(unit_number)
+    CALL parse_line(line, assignments(:), delimiter)
 
     ! Load balancing! Determine which cells are we moving and how many
     NCELL_moving = 1
     DO I_CELL = 1, 144
-        IF (assignments(this_PET+1,I_CELL)/= -1 .and. assignments(this_PET+1,I_CELL) /= this_PET) THEN
-            target_PET = assignments(this_PET + 1, I_CELL)
+        IF (assignments(I_CELL)/= -1 .and. assignments(I_CELL) /= this_PET) THEN
+            target_PET = assignments(I_CELL)
             swap_indices(NCELL_moving) = I_CELL
             NCELL_moving = NCELL_moving + 1
         ENDIF
@@ -3180,7 +3169,7 @@ CONTAINS
         CALL GC_Error( 'Failed to allocate RSTATE_balanced', RC, ThisLoc )
         RETURN
     End If
-    Allocate(assignments(Input_Opt%numCPUs,146), STAT=RC)
+    Allocate(assignments (144), STAT=RC)
     Call GC_CheckVar( 'fullchem_mod.F90:assignments', 0, RC )
     IF ( RC /= GC_SUCCESS ) Then
             CALL GC_Error( 'Failed to allocate assignments', RC, ThisLoc )
@@ -3192,6 +3181,16 @@ CONTAINS
         CALL GC_Error( 'Failed to allocate swap_indices', RC, ThisLoc )
         RETURN
     End If
+
+    delimiter = ','
+    assignmentPath = '$HOME/assignment/restricted/rank_' // trim(this_PET) // '.csv'
+    assignments = -1
+
+    OPEN(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=ios)
+    IF (ios /= 0) THEN
+        PRINT *, 'Error opening the file.'
+        STOP
+    END IF
   END SUBROUTINE Init_FullChem
 !EOC
 !------------------------------------------------------------------------------
@@ -3398,6 +3397,8 @@ CONTAINS
        CALL GC_CheckVar( 'fullchem_mod.F90:swap_indices', 2, RC )
        IF ( RC /= GC_SUCCESS ) RETURN
     ENDIF
+
+    CLOSE(unit_number)
   END SUBROUTINE Cleanup_FullChem
 
   SUBROUTINE parse_line(line, row, delimiter)
