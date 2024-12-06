@@ -1122,6 +1122,8 @@ CONTAINS
     END IF
     
     CALL parse_line(line, assignments(:), delimiter)
+    ! debug print contents of assignments array
+    PRINT *, 'PET ', this_PET, ' assignments: ', assignments
 
     ! Load balancing! Determine which cells are we moving and how many
     NCELL_moving = 1
@@ -3383,7 +3385,7 @@ CONTAINS
     INTEGER, intent(out) :: row(:)
     character(len=1), intent(in) :: delimiter
     integer :: i, j, start, len, iunit
-    character(len=3*NCELL_MAX) :: temp
+    character(len=NCELL_MAX) :: temp
 
     i = 1
     j = 1
