@@ -1134,9 +1134,6 @@ CONTAINS
     ENDDO
     NCELL_moving = NCELL_moving - 1
 
-    ! Print the swap indices array for debugging purposes
-    PRINT *, 'PET ', this_PET, ' is sending cells ', swap_indices(1:NCELL_moving)
-
     ! Copy the columns from the *_1D arrays to the *_send arrays
     DO I_CELL = 1, State_Grid%NZ
         DO i = 1, NCELL_moving
