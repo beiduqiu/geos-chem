@@ -235,7 +235,7 @@ CONTAINS
     INTEGER                :: IJL_to_Idx(State_Grid%NX, State_Grid%NY, State_Grid%NZ)
 
     ! All the KPP inputs remapped to a 1-D array
-    INTEGER                :: NCELL, NCELL_local, I_CELL, NCELL_balanced
+    INTEGER                :: NCELL, NCELL_local, I_CELL
     INTEGER                :: this_PET, target_PET, request
 
     ! For tagged CO saving
@@ -259,7 +259,6 @@ CONTAINS
 
     ! Objects
     TYPE(DgnMap),  POINTER :: mapData => NULL()
-    integer :: status(MPI_STATUS_SIZE, 4)
 !
 ! !DEFINED PARAMETERS
 !
@@ -1113,7 +1112,6 @@ CONTAINS
 
 #ifdef MODEL_GCHPCTM 
     ! Since we are only swapping columns, the number of cells in the balanced domain is the same as the local domain
-    NCELL_balanced = NCELL_local
     this_PET = Input_Opt%thisCPU
 
     ! Read the next line from the reassignment file, which should be the assignments for this interval
