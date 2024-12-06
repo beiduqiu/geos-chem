@@ -104,7 +104,6 @@ MODULE FullChem_Mod
 
   CHARACTER(len=2000) :: line
   CHARACTER(len=1) :: delimiter
-  CHARACTER(len=200) :: assignmentPath
   INTEGER, PARAMETER :: unit_number = 10
 
 CONTAINS
@@ -2824,7 +2823,7 @@ CONTAINS
     INTEGER            :: KppId,    N
 
     ! Strings
-    CHARACTER(LEN=255) :: ErrMsg,   ThisLoc, HomeDir
+    CHARACTER(LEN=255) :: ErrMsg,   ThisLoc, HomeDir, AssignmentPath
 
     !=======================================================================
     ! Init_FullChem begins here!
@@ -3042,6 +3041,7 @@ CONTAINS
     Call Timer_Add("ReverseCommunicationTimer", RC)
     CALL Timer_Add("SendAssignmentTimer", RC)
     CALL TImer_Add("     Integrate 1",         RC )
+
     Allocate(cost_1D   (NCELL_max)       , STAT=RC)
     CALL GC_CheckVar( 'fullchem_mod.F90:cost_1D', 0, RC )
     IF ( RC /= GC_SUCCESS ) Then
@@ -3190,10 +3190,11 @@ CONTAINS
     delimiter = ','
     CALL get_environment_variable("HOME", HomeDir)
     ! Use write to concatenate strings for the reassignment file path
-    WRITE(assignmentPath, '(A, A, I0, A)') TRIM(HomeDir), '/reassignment/restricted/rank_', Input_Opt%thisCPU, '.csv'
+    WRITE(AssignmentPath, '(A, A, I0, A)') TRIM(HomeDir), '/reassignment/restricted/rank_', Input_Opt%thisCPU, '.csv'
+    PRINT *, "AssignmentPath:", AssignmentPath
     assignments = -1
 
-    OPEN(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=RC)
+    OPEN(unit=unit_number, file=AssignmentPath, status='old', action='read', iostat=RC)
     IF (RC /= 0) THEN
         CALL GC_Error( 'Error opening reassignment file', RC, ThisLoc )
         RETURN
