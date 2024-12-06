@@ -3177,12 +3177,9 @@ CONTAINS
     End If
 
     delimiter = ','
-    PRINT *, "Initiating FullChem on CPU: ", Input_Opt%thisCPU
     CALL get_environment_variable("HOME", HomeDir)
     ! Use write to concatenate strings for the reassignment file path
-    PRINT *, "HomeDir:", HomeDir
     WRITE(AssignmentPath, '(A, A, I0, A)') TRIM(HomeDir), '/reassignment/restricted/rank_', Input_Opt%thisCPU, '.csv'
-    PRINT *, "AssignmentPath:", AssignmentPath
     assignments = -1
 
     OPEN(unit=unit_number, file=AssignmentPath, status='old', action='read', iostat=RC)
