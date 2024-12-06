@@ -3188,7 +3188,8 @@ CONTAINS
 
     delimiter = ','
     CALL get_environment_variable("HOME", HomeDir)
-    assignmentPath = TRIM(HomeDir) // '/reassignment/restricted/rank_' // trim(Input_Opt%thisCPU) // '.csv'
+    ! Use write to concatenate strings for the reassignment file path
+    WRITE(assignmentPath, '(A, A, I0, A)') TRIM(HomeDir), '/reassignment/restricted/rank_', Input_Opt%thisCPU, '.csv'
     assignments = -1
 
     OPEN(unit=unit_number, file=assignmentPath, status='old', action='read', iostat=RC)
