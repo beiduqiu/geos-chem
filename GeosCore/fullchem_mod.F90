@@ -1174,12 +1174,6 @@ CONTAINS
          end do
       end do
 #endif
-
-    ! CALL Timer_Sum_Loop( "Communication",            RC )
-    CALL Timer_Start(   TimerName = "Computation",                           &
-                        InLoop    = .TRUE.,                                  &
-                        ThreadNum = Thread,                                  &
-                        RC        = RC                                      )
     !$OMP PARALLEL DO                                                        &
     !$OMP DEFAULT( SHARED                                                   )&
     !$OMP PRIVATE( I,        J,        L,       N                           )&
@@ -1382,11 +1376,6 @@ CONTAINS
     ENDDO
 
 #ifdef MODEL_GCHPCTM
-    ! Reverse the load balancing
-    CALL Timer_End( TimerName = "Computation",                       &
-                    InLoop    = .TRUE.,                              &
-                    ThreadNum = Thread,                              &
-                    RC        = RC                                  )
     ! Gather the columns to be swapped to the *_recv arrays
     DO I_CELL = 1, State_Grid%NZ
         DO i = 1, NCELL_moving
@@ -1426,10 +1415,6 @@ CONTAINS
             RSTATE_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_send(:,(I_CELL-1)*NCELL_moving+i)
         END DO
     END DO
-
-    CALL Timer_Sum_Loop( "Computation",            RC )
-    WRITE(*, '(A,A,I0,A,I0, A,I0, A,I0, A)', ADVANCE='NO') "TimerFlag,", "Computation,", this_PET, ',', target_PET
-    CALL Timer_Print("Computation", RC)
 #endif
     
     DO L = 1, State_Grid%NZ
@@ -3025,7 +3010,6 @@ CONTAINS
     ! TODO: add MPI logic to figure this out
     NCELL_max = (State_Grid%NX * State_Grid%NY * State_Grid%NZ)
     ! NCELL_max:   Max number of cells to be computed on any domain
-    Call Timer_Add("Computation", RC)
     CALL Timer_Add("     Integrate 1",         RC )
 
     Allocate(cost_1D   (NCELL_max)       , STAT=RC)
