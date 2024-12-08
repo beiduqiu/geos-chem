@@ -1122,10 +1122,14 @@ CONTAINS
     END IF
     
     CALL parse_line(line, assignments(:), delimiter)
+
+#ifdef BALANCE_DEBUG
     ! debug print contents of assignments array
     PRINT *, 'PET ', this_PET, ' assignments: ', assignments
+#endif
 
     ! Load balancing! Determine which cells are we moving and how many
+    target_PET = -1
     NCELL_moving = 1
     DO I_CELL = 1, 144
         IF (assignments(I_CELL)/= -1 .and. assignments(I_CELL) /= this_PET) THEN
@@ -1136,45 +1140,48 @@ CONTAINS
     ENDDO
     NCELL_moving = NCELL_moving - 1
 
-    ! Copy the columns from the *_1D arrays to the *_send arrays
-    DO I_CELL = 1, State_Grid%NZ
-        DO i = 1, NCELL_moving
-          C_send(:,(I_CELL-1)*NCELL_moving+i) = C_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
-          RCONST_send(:,(I_CELL-1)*NCELL_moving+i) = RCONST_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
-          I_send(:,(I_CELL-1)*NCELL_moving+i) = ICNTRL_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
-          R_send(:,(I_CELL-1)*NCELL_moving+i) = RCNTRL_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+    ! Copy *_1d to *_balanced regardless of whether we are moving cells or not
+    C_balanced(:, :) = C_1D(:, :)
+    RCONST_balanced(:, :) = RCONST_1D(:, :)
+    ICNTRL_balanced(:, :) = ICNTRL_1D(:, :)
+    RCNTRL_balanced(:, :) = RCNTRL_1D(:, :)
+
+    ! Skip load balancing if we are not moving any cells, i.e. target_PET = -1
+    IF (target_PET /= -1) THEN
+        ! Copy the columns from the *_1D arrays to the *_send arrays
+        DO I_CELL = 1, State_Grid%NZ
+            DO i = 1, NCELL_moving
+            C_send(:,(I_CELL-1)*NCELL_moving+i) = C_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+            RCONST_send(:,(I_CELL-1)*NCELL_moving+i) = RCONST_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+            I_send(:,(I_CELL-1)*NCELL_moving+i) = ICNTRL_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+            R_send(:,(I_CELL-1)*NCELL_moving+i) = RCNTRL_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+            END DO
         END DO
-    END DO
 
-    ! Pass the actual data
-    Call MPI_Sendrecv( C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, target_PET, 0,       &
-                       C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, target_PET, 0,       &
-                       Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
-    Call MPI_Sendrecv( RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, target_PET, 1, &
-                       RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, target_PET, 1, &
-                       Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
-    Call MPI_Sendrecv( I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, target_PET, 2,                   &
-                       I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, target_PET, 2,                   &
-                       Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
-    Call MPI_Sendrecv( R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, target_PET, 3,          &
-                       R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, target_PET, 3,          &
-                       Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
+        ! Pass the actual data
+        CALL MPI_Sendrecv( C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, target_PET, 0,       &
+                        C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, target_PET, 0,       &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
+        CALL MPI_Sendrecv( RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, target_PET, 1, &
+                        RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, target_PET, 1, &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
+        CALL MPI_Sendrecv( I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, target_PET, 2,                   &
+                        I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, target_PET, 2,                   &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
+        CALL MPI_Sendrecv( R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, target_PET, 3,          &
+                        R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, target_PET, 3,          &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
 
-      ! Copy *_1d to *_balanced
-      C_balanced(:, :) = C_1D(:, :)
-      RCONST_balanced(:, :) = RCONST_1D(:, :)
-      ICNTRL_balanced(:, :) = ICNTRL_1D(:, :)
-      RCNTRL_balanced(:, :) = RCNTRL_1D(:, :)
-
-      ! Unpack the columns from the *_recv arrays to the *_balanced arrays
-      do I_CELL = 1, State_Grid%NZ
-         do i = 1, NCELL_moving
-            C_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = C_recv(:,(I_CELL-1)*NCELL_moving+i)
-            RCONST_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = RCONST_recv(:,(I_CELL-1)*NCELL_moving+i)
-            ICNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = I_recv(:,(I_CELL-1)*NCELL_moving+i)
-            RCNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_recv(:,(I_CELL-1)*NCELL_moving+i)
-         end do
-      end do
+        ! Unpack the columns from the *_recv arrays to the *_balanced arrays
+        DO I_CELL = 1, State_Grid%NZ
+            DO i = 1, NCELL_moving
+                C_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = C_recv(:,(I_CELL-1)*NCELL_moving+i)
+                RCONST_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = RCONST_recv(:,(I_CELL-1)*NCELL_moving+i)
+                ICNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = I_recv(:,(I_CELL-1)*NCELL_moving+i)
+                RCNTRL_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_recv(:,(I_CELL-1)*NCELL_moving+i)
+            END DO
+        END DO
+    ENDIF
 #endif
     !$OMP PARALLEL DO                                                        &
     !$OMP DEFAULT( SHARED                                                   )&
@@ -1378,45 +1385,48 @@ CONTAINS
     ENDDO
 
 #ifdef MODEL_GCHPCTM
-    ! Gather the columns to be swapped to the *_recv arrays
-    DO I_CELL = 1, State_Grid%NZ
-        DO i = 1, NCELL_moving
-            C_recv(:,(I_CELL-1)*NCELL_moving+i) = C_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
-            RCONST_recv(:,(I_CELL-1)*NCELL_moving+i) = RCONST_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
-            I_recv(:,(I_CELL-1)*NCELL_moving+i) = ISTATUS_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
-            R_recv(:,(I_CELL-1)*NCELL_moving+i) = RSTATE_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
-        END DO
-    END DO
-
-    ! Pass the actual data
-    Call MPI_Sendrecv( C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, target_PET, 4,       &
-                       C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, target_PET, 4,       &
-                       Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )             
-    Call MPI_Sendrecv( RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, target_PET, 5, &
-                       RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, target_PET, 5, &
-                       Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
-    Call MPI_Sendrecv( I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, target_PET, 6,                   &
-                       I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, target_PET, 6,                   &
-                       Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
-    Call MPI_Sendrecv( R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, target_PET, 7,          &
-                       R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, target_PET, 7,          &
-                       Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
-
-    ! Copy c_balanced to c_1d
+    ! Copy c_balanced to c_1d regardless of whether we are moving cells or not
     C_1D(:,:) = C_balanced(:,:)
     RCONST_1D(:,:) = RCONST_balanced(:,:)
     ISTATUS_1D(:,:) = ISTATUS_balanced(:,:)
     RSTATE_1D(:,:) = RSTATE_balanced(:,:)
 
-    ! Unpack the columns from the *_send arrays
-    DO I_CELL = 1, State_Grid%NZ
-        DO i = 1, NCELL_moving
-            C_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = C_send(:,(I_CELL-1)*NCELL_moving+i)
-            RCONST_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = RCONST_send(:,(I_CELL-1)*NCELL_moving+i)
-            ISTATUS_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = I_send(:,(I_CELL-1)*NCELL_moving+i)
-            RSTATE_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_send(:,(I_CELL-1)*NCELL_moving+i)
+    ! Skip reverse load balancing if we are not moving any cells, i.e. target_PET = -1
+    IF (target_PET /= -1) THEN
+        ! Gather the columns to be swapped to the *_recv arrays
+        DO I_CELL = 1, State_Grid%NZ
+            DO i = 1, NCELL_moving
+                C_recv(:,(I_CELL-1)*NCELL_moving+i) = C_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+                RCONST_recv(:,(I_CELL-1)*NCELL_moving+i) = RCONST_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+                I_recv(:,(I_CELL-1)*NCELL_moving+i) = ISTATUS_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+                R_recv(:,(I_CELL-1)*NCELL_moving+i) = RSTATE_balanced(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i))
+            END DO
         END DO
-    END DO
+
+        ! Pass the actual data
+        CALL MPI_Sendrecv( C_recv(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, target_PET, 4,       &
+                        C_send(1,1), State_Grid%NZ*NCELL_moving*NSPEC, MPI_DOUBLE_PRECISION, target_PET, 4,       &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )             
+        CALL MPI_Sendrecv( RCONST_recv(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, target_PET, 5, &
+                        RCONST_send(1,1), State_Grid%NZ*NCELL_moving*NREACT, MPI_DOUBLE_PRECISION, target_PET, 5, &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
+        CALL MPI_Sendrecv( I_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, target_PET, 6,                   &
+                        I_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_INTEGER, target_PET, 6,                   &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
+        CALL MPI_Sendrecv( R_recv(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, target_PET, 7,          &
+                        R_send(1,1), State_Grid%NZ*NCELL_moving*20, MPI_DOUBLE_PRECISION, target_PET, 7,          &
+                        Input_Opt%mpiComm, MPI_STATUS_IGNORE, RC                                                 )
+
+        ! Unpack the columns from the *_send arrays
+        DO I_CELL = 1, State_Grid%NZ
+            DO i = 1, NCELL_moving
+                C_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = C_send(:,(I_CELL-1)*NCELL_moving+i)
+                RCONST_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = RCONST_send(:,(I_CELL-1)*NCELL_moving+i)
+                ISTATUS_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = I_send(:,(I_CELL-1)*NCELL_moving+i)
+                RSTATE_1D(:,(I_CELL-1)*State_Grid%NX*State_Grid%NY+swap_indices(i)) = R_send(:,(I_CELL-1)*NCELL_moving+i)
+            END DO
+        END DO
+    ENDIF
 #endif
     
     DO L = 1, State_Grid%NZ
