@@ -1139,7 +1139,10 @@ CONTAINS
         ENDIF
     ENDDO
     NCELL_moving = NCELL_moving - 1
-
+    CALL Timer_Start( TimerName = "Communication",                       &
+                                  InLoop    = .TRUE.,                              &
+                                  ThreadNum = Thread,                              &
+                                  RC        = RC                                  )
     ! Copy *_1d to *_balanced regardless of whether we are moving cells or not
     C_balanced(:, :) = C_1D(:, :)
     RCONST_balanced(:, :) = RCONST_1D(:, :)
@@ -1182,7 +1185,17 @@ CONTAINS
             END DO
         END DO
     ENDIF
+    CALL Timer_End( TimerName = "Communication",                       &
+InLoop    = .TRUE.,                              &
+ThreadNum = Thread,                              &
+RC        = RC                                  )
+CALL Timer_Sum_Loop( "Communication",            RC )
 #endif
+
+CALL Timer_Start( TimerName = "Computation",                       &
+                                  InLoop    = .TRUE.,                              &
+                                  ThreadNum = Thread,                              &
+                                  RC        = RC                                  )
     !$OMP PARALLEL DO                                                        &
     !$OMP DEFAULT( SHARED                                                   )&
     !$OMP PRIVATE( I,        J,        L,       N                           )&
@@ -1383,8 +1396,17 @@ CONTAINS
        C_balanced(:,I_CELL) = C(:)
        RCONST_balanced(:,I_CELL) = RCONST(:)
     ENDDO
+    CALL Timer_End( TimerName = "Computation",                       &
+    InLoop    = .TRUE.,                              &
+    ThreadNum = Thread,                              &
+    RC        = RC                                  )
+ CALL Timer_Sum_Loop( "Computation",            RC )
 
 #ifdef MODEL_GCHPCTM
+CALL Timer_Start( TimerName = "ReverseCommunicationTimer",                       &
+                  InLoop    = .TRUE.,                              &
+                  ThreadNum = Thread,                              &
+                  RC        = RC                                  )
     ! Copy c_balanced to c_1d regardless of whether we are moving cells or not
     C_1D(:,:) = C_balanced(:,:)
     RCONST_1D(:,:) = RCONST_balanced(:,:)
@@ -1427,6 +1449,20 @@ CONTAINS
             END DO
         END DO
     ENDIF
+    CALL Timer_End( TimerName = "ReverseCommunicationTimer",                       &
+    InLoop    = .TRUE.,                              &
+    ThreadNum = Thread,                              &
+    RC        = RC                                  )
+    CALL Timer_Sum_Loop( "ReverseCommunicationTimer",            RC )
+
+WRITE(*, '(A,A,I0,A)', ADVANCE='NO') "TimerFlag,","Communication,", this_PET, ','
+Call Timer_Print("Communication", RC)
+WRITE(*, '(A,A,I0,A)', ADVANCE='NO') "TimerFlag,","Computation,", this_PET, ','
+CALL Timer_Print("Computation", RC)
+WRITE(*, '(A,A,I0,A)', ADVANCE='NO') "TimerFlag,","ReverseCommunicationTimer,", this_PET, ','
+Call Timer_Print("ReverseCommunicationTimer", RC)
+
+
 #endif
     
     DO L = 1, State_Grid%NZ
@@ -3023,7 +3059,9 @@ CONTAINS
     NCELL_max = (State_Grid%NX * State_Grid%NY * State_Grid%NZ)
     ! NCELL_max:   Max number of cells to be computed on any domain
     CALL Timer_Add("     Integrate 1",         RC )
-
+    Call Timer_Add("Communication", RC)
+    Call Timer_Add("Computation", RC)
+    Call Timer_Add("ReverseCommunicationTimer", RC)
     Allocate(cost_1D   (NCELL_max)       , STAT=RC)
     CALL GC_CheckVar( 'fullchem_mod.F90:cost_1D', 0, RC )
     IF ( RC /= GC_SUCCESS ) Then
@@ -3172,7 +3210,8 @@ CONTAINS
     delimiter = ','
     CALL get_environment_variable("HOME", HomeDir)
     ! Use write to concatenate strings for the reassignment file path
-    WRITE(AssignmentPath, '(A, A, I0, A)') TRIM(HomeDir), '/reassignment/restricted/rank_', Input_Opt%thisCPU, '.csv'
+    WRITE(AssignmentPath, '(A, A, I0, A)') TRIM(HomeDir), '/GCHP_washu/Run/Assignment/restricted/rank_', Input_Opt%thisCPU, '.csv'
+    print *, AssignmentPath
     assignments = -1
 
     OPEN(unit=unit_number, file=AssignmentPath, status='old', action='read', iostat=RC)
